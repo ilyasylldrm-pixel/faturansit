@@ -62,6 +62,7 @@ const ROLE_LABELS: Record<UserRole, string> = {
 const INTEGRATOR_LABELS: Record<EInvoiceIntegrator, string> = {
   FATURANSIT: 'Faturansit Özel Entegratör',
   GIB_PORTAL: 'GİB Portal',
+  MYSOFT: 'Mysoft e-Belge',
 };
 
 export const UsersAndIntegrationsView: React.FC<UsersAndIntegrationsViewProps> = ({
@@ -459,6 +460,7 @@ export const UsersAndIntegrationsView: React.FC<UsersAndIntegrationsViewProps> =
                   >
                     <option value="FATURANSIT">Faturansit Özel Entegratör</option>
                     <option value="GIB_PORTAL">GİB Portal</option>
+                    <option value="MYSOFT">Mysoft e-Belge</option>
                   </select>
                 </div>
               </div>

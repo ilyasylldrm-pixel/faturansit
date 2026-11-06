@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   FileText,
   Send,
@@ -33,6 +33,15 @@ import {
   determineDocumentType,
   formatTryCurrency,
 } from '../utils/invoicingEngine';
+import {
+  acceptMysoftInvoice,
+  denyMysoftInvoice,
+  downloadMysoftFile,
+  downloadMysoftPdf,
+  listMysoftDocuments,
+  MysoftClientError,
+  type MysoftDocumentRow,
+} from '../services/mysoftClient';
 import { PascalHeroBanner } from './PascalUi';
 
 interface EDocumentModuleViewProps {
@@ -41,6 +50,7 @@ interface EDocumentModuleViewProps {
   orders: MarketplaceOrder[];
   incomingInvoices: IncomingEInvoice[];
   systemSettings: SystemPlatformSettings;
+  tenantIdentifierNumber?: string;
   onUpdateSystemSettings: (next: SystemPlatformSettings) => void;
   onPreviewInvoice: (order: MarketplaceOrder) => void;
   onIssueSingleInvoice: (orderId: string, allowDefaultTckn?: boolean) => void;
@@ -66,6 +76,7 @@ const INTEGRATOR_OPTIONS: Array<{ value: EInvoiceIntegrator; label: string }> =
   [
     { value: 'FATURANSIT', label: 'Faturansit Özel Entegratör' },
     { value: 'GIB_PORTAL', label: 'GİB Portal Arşiv' },
+    { value: 'MYSOFT', label: 'Mysoft e-Belge' },
   ];
 
 function getOrderTotals(order: MarketplaceOrder) {
@@ -85,6 +96,7 @@ export const EDocumentModuleView: React.FC<EDocumentModuleViewProps> = ({
   orders,
   incomingInvoices,
   systemSettings,
+  tenantIdentifierNumber,
   onUpdateSystemSettings,
   onPreviewInvoice,
   onIssueSingleInvoice,
@@ -101,6 +113,10 @@ export const EDocumentModuleView: React.FC<EDocumentModuleViewProps> = ({
   const [draftSettings, setDraftSettings] =
     useState<SystemPlatformSettings>(systemSettings);
   const [settingsSavedNotice, setSettingsSavedNotice] = useState(false);
+  const [mysoftRows, setMysoftRows] = useState<MysoftDocumentRow[]>([]);
+  const [mysoftInbox, setMysoftInbox] = useState<IncomingEInvoice[] | null>(null);
+  const [mysoftListError, setMysoftListError] = useState<string | null>(null);
+  const [mysoftListLoading, setMysoftListLoading] = useState(false);
 
   // Filters for Outgoing Sub-Modules
   const [outgoingSearch, setOutgoingSearch] = useState('');
@@ -151,6 +167,68 @@ export const EDocumentModuleView: React.FC<EDocumentModuleViewProps> = ({
   const [createIncomingError, setCreateIncomingError] = useState<string | null>(
     null
   );
+
+  const mysoftActive = systemSettings.primaryGibIntegrator === 'MYSOFT';
+
+  const reloadMysoftDocuments = async () => {
+    if (!mysoftActive) return;
+    setMysoftListLoading(true);
+    setMysoftListError(null);
+    try {
+      if (activeSubTab === 'incoming_efatura') {
+        const rows = await listMysoftDocuments({
+          direction: 'incoming',
+          tenantIdentifierNumber,
+        });
+        setMysoftInbox(
+          rows.map((row) => ({
+            id: row.ettn || row.docNo,
+            ettn: row.ettn,
+            invoiceNumber: row.docNo || row.ettn,
+            supplierTitle: row.accountName || 'Tedarikçi',
+            supplierVkn: row.vknTckn,
+            supplierTaxOffice: '',
+            supplierCity: '',
+            issueDate: row.docDate,
+            receivedAt: row.docDate,
+            scenario: row.profile === 'TEMELFATURA' ? 'TEMELFATURA' : 'TICARIFATURA',
+            subtotalExclVat: row.payableAmount,
+            totalVat: 0,
+            payableAmount: row.payableAmount,
+            currency: 'TRY',
+            responseStatus: 'PENDING_APPROVAL',
+            lineSummary: row.profile || 'Mysoft gelen belge',
+            itemCount: 1,
+          }))
+        );
+      } else {
+        const rows = await listMysoftDocuments({
+          direction: 'outgoing',
+          tenantIdentifierNumber,
+          eDocumentType: activeSubTab === 'outgoing_earsiv' ? 'EARSIVFATURA' : 'EFATURA',
+        });
+        setMysoftRows(rows);
+      }
+    } catch (error) {
+      const message = error instanceof MysoftClientError ? error.message : 'Mysoft listesi alınamadı.';
+      setMysoftListError(message);
+      if (activeSubTab === 'incoming_efatura') setMysoftInbox([]);
+    } finally {
+      setMysoftListLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!mysoftActive) {
+      setMysoftInbox(null);
+      setMysoftRows([]);
+      setMysoftListError(null);
+      return;
+    }
+    void reloadMysoftDocuments();
+    // Liste, sekme veya firma değişince yenilenir.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mysoftActive, activeSubTab, tenantIdentifierNumber]);
 
   // Split orders into Giden e-Fatura (E_FATURA) and Giden e-Arşiv (E_ARSIV)
   const { eFaturaOrders, eArsivOrders } = useMemo(() => {
@@ -213,14 +291,17 @@ export const EDocumentModuleView: React.FC<EDocumentModuleViewProps> = ({
   }, [eArsivOrders]);
 
   // Metrics for Gelen e-Fatura
+  const visibleIncoming =
+    mysoftActive ? (mysoftInbox ?? []) : incomingInvoices;
+
   const incomingMetrics = useMemo(() => {
-    const total = incomingInvoices.length;
+    const total = visibleIncoming.length;
     let pendingApproval = 0;
     let accepted = 0;
     let rejected = 0;
     let acceptedTotalAmount = 0;
 
-    for (const inv of incomingInvoices) {
+    for (const inv of visibleIncoming) {
       if (inv.responseStatus === 'PENDING_APPROVAL') {
         pendingApproval += 1;
       } else if (inv.responseStatus === 'ACCEPTED') {
@@ -237,7 +318,7 @@ export const EDocumentModuleView: React.FC<EDocumentModuleViewProps> = ({
       rejected,
       acceptedTotalAmount,
     };
-  }, [incomingInvoices]);
+  }, [visibleIncoming]);
 
   // Filtered Outgoing List for active outgoing sub-tab
   const activeOutgoingOrders =
@@ -273,7 +354,7 @@ export const EDocumentModuleView: React.FC<EDocumentModuleViewProps> = ({
 
   // Filtered Incoming e-Fatura List
   const filteredIncomingInvoices = useMemo(() => {
-    return incomingInvoices.filter((inv) => {
+    return visibleIncoming.filter((inv) => {
       if (incomingFilter !== 'ALL' && inv.responseStatus !== incomingFilter) {
         return false;
       }
@@ -289,7 +370,7 @@ export const EDocumentModuleView: React.FC<EDocumentModuleViewProps> = ({
       }
       return true;
     });
-  }, [incomingInvoices, incomingFilter, incomingSearch]);
+  }, [visibleIncoming, incomingFilter, incomingSearch]);
 
   const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
@@ -310,6 +391,48 @@ export const EDocumentModuleView: React.FC<EDocumentModuleViewProps> = ({
     onUpdateSystemSettings(normalized);
     setSettingsSavedNotice(true);
     setTimeout(() => setSettingsSavedNotice(false), 3000);
+  };
+
+  const respondIncoming = async (
+    invoice: IncomingEInvoice,
+    decision: 'ACCEPTED' | 'REJECTED',
+    reason?: string
+  ) => {
+    if (mysoftActive) {
+      if (!invoice.ettn) {
+        setMysoftListError('Bu belgenin ETTN değeri yok.');
+        return;
+      }
+      try {
+        if (decision === 'ACCEPTED') {
+          await acceptMysoftInvoice({ ettn: invoice.ettn, tenantIdentifierNumber });
+        } else {
+          await denyMysoftInvoice({
+            ettn: invoice.ettn,
+            rejectReason: reason,
+            tenantIdentifierNumber,
+          });
+        }
+        setMysoftInbox((prev) =>
+          (prev ?? []).map((row) =>
+            row.id === invoice.id
+              ? {
+                  ...row,
+                  responseStatus: decision,
+                  rejectionReason: decision === 'REJECTED' ? reason : undefined,
+                }
+              : row
+          )
+        );
+        setMysoftListError(null);
+      } catch (error) {
+        setMysoftListError(
+          error instanceof MysoftClientError ? error.message : 'Mysoft yanıtı gönderilemedi.'
+        );
+        return;
+      }
+    }
+    onRespondIncomingInvoice(invoice.id, decision, reason);
   };
 
   const handleConfirmCancelEArchive = (e: React.FormEvent) => {
@@ -342,8 +465,8 @@ export const EDocumentModuleView: React.FC<EDocumentModuleViewProps> = ({
   const handleConfirmRejectIncoming = (e: React.FormEvent) => {
     e.preventDefault();
     if (!rejectIncomingTarget) return;
-    onRespondIncomingInvoice(
-      rejectIncomingTarget.id,
+    void respondIncoming(
+      rejectIncomingTarget,
       'REJECTED',
       rejectReasonInput.trim() || 'Ticari e-Fatura reddedildi.'
     );
@@ -428,6 +551,143 @@ export const EDocumentModuleView: React.FC<EDocumentModuleViewProps> = ({
         primaryLabel={`GİB Seri Ön Eki (${systemSettings.eInvoicePrefix}/${systemSettings.eArchivePrefix})`}
         onPrimaryAction={() => setIsSettingsOpen((prev) => !prev)}
       />
+
+      {mysoftActive && activeSubTab !== 'incoming_efatura' && (
+        <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900">Mysoft giden kutu</h2>
+              <p className="text-xs text-slate-500">
+                Son 90 gün. Kesilen belgenin numarası ve ETTN burada görünür.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void reloadMysoftDocuments()}
+              disabled={mysoftListLoading}
+              className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 cursor-pointer"
+            >
+              {mysoftListLoading ? 'Yükleniyor...' : 'Listeyi yenile'}
+            </button>
+          </div>
+          {mysoftListLoading && (
+            <p className="text-xs text-slate-500">Mysoft listesi yükleniyor.</p>
+          )}
+          {mysoftListError && (
+            <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              {mysoftListError}
+            </p>
+          )}
+          {!mysoftListLoading && !mysoftListError && mysoftRows.length === 0 && (
+            <p className="text-xs text-slate-500">Bu aralıkta Mysoft belgesi yok.</p>
+          )}
+          {mysoftRows.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-slate-500">
+                    <th className="py-1 pr-3">Belge no</th>
+                    <th className="py-1 pr-3">ETTN</th>
+                    <th className="py-1 pr-3">Cari</th>
+                    <th className="py-1 pr-3">Tarih</th>
+                    <th className="py-1 pr-3">Tutar</th>
+                    <th className="py-1"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {mysoftRows.map((row) => (
+                    <tr key={row.ettn || row.docNo} className="border-t border-slate-100">
+                      <td className="py-1.5 pr-3 font-mono">{row.docNo || '—'}</td>
+                      <td className="py-1.5 pr-3 font-mono text-[11px]">{row.ettn || '—'}</td>
+                      <td className="py-1.5 pr-3">{row.accountName || row.vknTckn || '—'}</td>
+                      <td className="py-1.5 pr-3">{row.docDate || '—'}</td>
+                      <td className="py-1.5 pr-3 font-mono">{formatTryCurrency(row.payableAmount)}</td>
+                      <td className="py-1.5">
+                        {row.ettn && (
+                          <button
+                            type="button"
+                            className="text-blue-700 font-semibold cursor-pointer"
+                            onClick={() => {
+                              void downloadMysoftPdf({
+                                direction: 'outgoing',
+                                ettn: row.ettn,
+                                tenantIdentifierNumber,
+                              }).catch((error: unknown) => {
+                                setMysoftListError(
+                                  error instanceof Error ? error.message : 'PDF alınamadı.'
+                                );
+                              });
+                            }}
+                          >
+                            PDF
+                          </button>
+                        )}
+                        {row.ettn && (
+                          <button
+                            type="button"
+                            className="ml-2 text-blue-700 font-semibold cursor-pointer"
+                            onClick={() => {
+                              void downloadMysoftFile({
+                                direction: 'outgoing',
+                                ettn: row.ettn,
+                                format: 'xml',
+                                tenantIdentifierNumber,
+                              }).catch((error: unknown) => {
+                                setMysoftListError(
+                                  error instanceof Error ? error.message : 'XML alınamadı.'
+                                );
+                              });
+                            }}
+                          >
+                            XML
+                          </button>
+                        )}
+                        {row.ettn && (
+                          <button
+                            type="button"
+                            className="ml-2 text-blue-700 font-semibold cursor-pointer"
+                            onClick={() => {
+                              void downloadMysoftFile({
+                                direction: 'outgoing',
+                                ettn: row.ettn,
+                                format: 'html',
+                                tenantIdentifierNumber,
+                              }).catch((error: unknown) => {
+                                setMysoftListError(
+                                  error instanceof Error ? error.message : 'HTML alınamadı.'
+                                );
+                              });
+                            }}
+                          >
+                            HTML
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {mysoftActive && activeSubTab === 'incoming_efatura' && (
+        <div className="flex flex-wrap items-center justify-between gap-2 bg-white rounded-xl border border-slate-200 px-4 py-3">
+          <p className="text-xs text-slate-600">
+            Gelen kutusu Mysoft’tan geliyor.
+            {mysoftListError ? ` ${mysoftListError}` : ''}
+          </p>
+          <button
+            type="button"
+            onClick={() => void reloadMysoftDocuments()}
+            disabled={mysoftListLoading}
+            className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 cursor-pointer"
+          >
+            {mysoftListLoading ? 'Yükleniyor...' : 'Listeyi yenile'}
+          </button>
+        </div>
+      )}
 
       {/* Module Top Header + Sub-Module Navigation Bar */}
       <div className="bg-white rounded-2xl border border-slate-200/90 p-5 space-y-5 shadow-xs">
@@ -731,7 +991,7 @@ export const EDocumentModuleView: React.FC<EDocumentModuleViewProps> = ({
                   : 'bg-white text-[#0F6BAE] border border-slate-200'
               }`}
             >
-              {incomingInvoices.length}
+              {visibleIncoming.length}
             </span>
           </button>
         </div>
@@ -1633,12 +1893,9 @@ export const EDocumentModuleView: React.FC<EDocumentModuleViewProps> = ({
                               <>
                                 <button
                                   type="button"
-                                  onClick={() =>
-                                    onRespondIncomingInvoice(
-                                      inv.id,
-                                      'ACCEPTED'
-                                    )
-                                  }
+                                  onClick={() => {
+                                    void respondIncoming(inv, 'ACCEPTED');
+                                  }}
                                   className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors cursor-pointer"
                                 >
                                   <Check className="w-3.5 h-3.5" />
@@ -1651,6 +1908,46 @@ export const EDocumentModuleView: React.FC<EDocumentModuleViewProps> = ({
                                 >
                                   <XCircle className="w-3.5 h-3.5" />
                                   Reddet
+                                </button>
+                              </>
+                            )}
+                            {mysoftActive && inv.ettn && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    void downloadMysoftFile({
+                                      direction: 'incoming',
+                                      ettn: inv.ettn,
+                                      format: 'pdf',
+                                      tenantIdentifierNumber,
+                                    }).catch((error: unknown) => {
+                                      setMysoftListError(
+                                        error instanceof Error ? error.message : 'PDF alınamadı.'
+                                      );
+                                    });
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer"
+                                >
+                                  PDF
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    void downloadMysoftFile({
+                                      direction: 'incoming',
+                                      ettn: inv.ettn,
+                                      format: 'xml',
+                                      tenantIdentifierNumber,
+                                    }).catch((error: unknown) => {
+                                      setMysoftListError(
+                                        error instanceof Error ? error.message : 'XML alınamadı.'
+                                      );
+                                    });
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer"
+                                >
+                                  XML
                                 </button>
                               </>
                             )}

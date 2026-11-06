@@ -17,6 +17,7 @@ import {
   PlatformUser,
 } from '../types/invoicing';
 import { validateTurkishTaxIdentifier } from '../utils/invoicingEngine';
+import { checkMysoftRecipient } from '../services/mysoftClient';
 
 interface CompanyProfileViewProps {
   users: PlatformUser[];
@@ -105,7 +106,9 @@ export const CompanyProfileView: React.FC<CompanyProfileViewProps> = ({
     registered: boolean;
     title: string;
     date: string;
+    detail: string;
   } | null>(null);
+  const [gibChecking, setGibChecking] = useState(false);
 
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -136,16 +139,44 @@ export const CompanyProfileView: React.FC<CompanyProfileViewProps> = ({
     }
 
     setFormError(null);
-    setFormData((prev) => ({
-      ...prev,
-      eInvoiceStatus: 'REGISTERED',
-    }));
-    setGibCheckResult({
-      tested: true,
-      registered: true,
-      title: formData.legalTitle,
-      date: '2026-11-04 16:40',
-    });
+    setGibChecking(true);
+    const stamp = new Date().toLocaleString('sv-SE', {
+      timeZone: 'Europe/Istanbul',
+      hour12: false,
+    }).slice(0, 16);
+    void checkMysoftRecipient(validRes.normalizedId, validRes.normalizedId)
+      .then((recipient) => {
+        if (!recipient.title && !recipient.registered && !recipient.taxOffice) {
+          setFormError('Mysoft bu numara için mükellef kaydı döndürmedi.');
+          setGibCheckResult(null);
+          return;
+        }
+        setFormData((prev) => ({
+          ...prev,
+          legalTitle: recipient.title || prev.legalTitle,
+          taxOffice: recipient.taxOffice || prev.taxOffice,
+          city: recipient.city || prev.city,
+          district: recipient.district || prev.district,
+          addressLine: recipient.address || prev.addressLine,
+          eInvoiceStatus: recipient.registered ? 'REGISTERED' : 'NOT_REGISTERED',
+          eInvoiceAliasPk: recipient.pkAlias || prev.eInvoiceAliasPk,
+        }));
+        setGibCheckResult({
+          tested: true,
+          registered: recipient.registered,
+          title: recipient.title || formData.legalTitle,
+          date: stamp,
+          detail: recipient.registered
+            ? 'Aktif e-Fatura mükellefi'
+            : 'Kayıt bulundu, e-Fatura posta kutusu yok',
+        });
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : 'Mükellef sorgusu başarısız.';
+        setFormError(message);
+        setGibCheckResult(null);
+      })
+      .finally(() => setGibChecking(false));
   };
 
   const handleSaveProfile = (e: React.FormEvent) => {
@@ -325,11 +356,12 @@ export const CompanyProfileView: React.FC<CompanyProfileViewProps> = ({
                 <button
                   type="button"
                   onClick={handleSimulateGibCheck}
-                  title="GİB e-Fatura Mükellef Listesinde Sorgula"
-                  className="px-2.5 py-2 text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg border border-blue-200 transition-colors whitespace-nowrap cursor-pointer flex items-center gap-1"
+                  disabled={gibChecking}
+                  title="Mysoft üzerinden GİB mükellef sorgusu"
+                  className="px-2.5 py-2 text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg border border-blue-200 transition-colors whitespace-nowrap cursor-pointer flex items-center gap-1 disabled:opacity-60"
                 >
                   <Search className="w-3.5 h-3.5" />
-                  GİB Doğrula
+                  {gibChecking ? 'Sorgulanıyor' : 'GİB Doğrula'}
                 </button>
               </div>
             </div>
@@ -425,14 +457,20 @@ export const CompanyProfileView: React.FC<CompanyProfileViewProps> = ({
           </div>
 
           {gibCheckResult && (
-            <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-emerald-900">
+            <div
+              className={`mt-3 p-3 border rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs ${
+                gibCheckResult.registered
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                  : 'bg-amber-50 border-amber-200 text-amber-900'
+              }`}
+            >
               <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
                 <span>
-                  <strong>GİB Mükellef Listesi Doğrulandı:</strong> {gibCheckResult.title} (Aktif e-Fatura Mükellefi)
+                  <strong>{gibCheckResult.title || 'Mükellef'}:</strong> {gibCheckResult.detail}
                 </span>
               </div>
-              <span className="font-mono text-[11px] text-emerald-700">
+              <span className="font-mono text-[11px]">
                 Sorgu Zamanı: {gibCheckResult.date}
               </span>
             </div>
@@ -744,7 +782,7 @@ export const CompanyProfileView: React.FC<CompanyProfileViewProps> = ({
                     ? 'Faturansit Özel Entegratör'
                     : formData.integrator === 'GIB_PORTAL'
                     ? 'GİB Portal'
-                    : formData.integrator}
+                    : 'Mysoft e-Belge'}
                 </span>
               </div>
             </div>

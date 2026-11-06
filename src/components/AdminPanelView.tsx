@@ -149,6 +149,7 @@ const ROLE_LABELS: Record<UserRole, string> = {
 const INTEGRATOR_NAMES: Record<EInvoiceIntegrator, string> = {
   FATURANSIT: 'Faturansit Özel Entegratör',
   GIB_PORTAL: 'GİB Portal',
+  MYSOFT: 'Mysoft e-Belge',
 };
 
 export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
@@ -608,6 +609,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
           users={users}
           selectedUserId={selectedUserId}
           onSelectUser={onSelectUser}
+          tenantIdentifierNumber={companyProfiles?.[selectedUserId]?.taxIdentifier}
           onBatchRepairIndividualOrders={onBatchRepairIndividualOrders}
           onSaveAllModules={onSaveAllModules}
           hasUnsavedChanges={hasUnsavedChanges}
