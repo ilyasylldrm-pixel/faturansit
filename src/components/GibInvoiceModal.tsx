@@ -9,18 +9,22 @@ import {
   generateUblTrXmlPreview,
   roundCurrency,
 } from '../utils/invoicingEngine';
+import { downloadMysoftPdf } from '../services/mysoftClient';
 
 interface GibInvoiceModalProps {
   order: MarketplaceOrder | null;
+  tenantIdentifierNumber?: string;
   onClose: () => void;
 }
 
 export const GibInvoiceModal: React.FC<GibInvoiceModalProps> = ({
   order,
+  tenantIdentifierNumber,
   onClose,
 }) => {
   const [viewMode, setViewMode] = useState<'visual' | 'xml'>('visual');
   const [copiedNotice, setCopiedNotice] = useState<string | null>(null);
+  const [pdfError, setPdfError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!order) return;
@@ -76,6 +80,18 @@ export const GibInvoiceModal: React.FC<GibInvoiceModalProps> = ({
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const handleMysoftPdf = () => {
+    if (!order.ettn) return;
+    setPdfError(null);
+    void downloadMysoftPdf({
+      direction: 'outgoing',
+      ettn: order.ettn,
+      tenantIdentifierNumber,
+    }).catch((error: unknown) => {
+      setPdfError(error instanceof Error ? error.message : 'PDF alınamadı.');
+    });
   };
 
   return (
@@ -143,6 +159,17 @@ export const GibInvoiceModal: React.FC<GibInvoiceModalProps> = ({
               Yazdır / PDF
             </button>
 
+            {order.ettn && (
+              <button
+                type="button"
+                onClick={handleMysoftPdf}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5 text-[#248BD6]" />
+                Mysoft PDF
+              </button>
+            )}
+
             <button
               type="button"
               onClick={onClose}
@@ -153,6 +180,12 @@ export const GibInvoiceModal: React.FC<GibInvoiceModalProps> = ({
             </button>
           </div>
         </div>
+
+        {pdfError && (
+          <div className="px-6 py-2 bg-amber-50 border-b border-amber-200 text-xs text-amber-900">
+            {pdfError}
+          </div>
+        )}
 
         {copiedNotice && (
           <div className="flex items-center gap-2 px-6 py-2 bg-emerald-50 border-b border-emerald-200 text-xs font-medium text-emerald-800">

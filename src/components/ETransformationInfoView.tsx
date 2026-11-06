@@ -16,6 +16,7 @@ import {
   PlatformUser,
   SystemPlatformSettings,
 } from '../types/invoicing';
+import { fetchMysoftStatus } from '../services/mysoftClient';
 
 interface ETransformationInfoViewProps {
   systemSettings: SystemPlatformSettings;
@@ -43,6 +44,11 @@ const INTEGRATOR_OPTIONS: Array<{
     label: 'GİB Portal Arşiv Doğrudan Bağlantı',
     desc: 'GİB interaktif portal doğrudan kuyruk protokolü',
   },
+  {
+    value: 'MYSOFT',
+    label: 'Mysoft e-Belge',
+    desc: 'Test ve canlı Mysoft e-fatura / e-arşiv API',
+  },
 ];
 
 export const ETransformationInfoView: React.FC<ETransformationInfoViewProps> = ({
@@ -64,8 +70,9 @@ export const ETransformationInfoView: React.FC<ETransformationInfoViewProps> = (
 
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
   const [testConnectionStatus, setTestConnectionStatus] = useState<
-    'IDLE' | 'TESTING' | 'SUCCESS'
+    'IDLE' | 'TESTING' | 'SUCCESS' | 'ERROR'
   >('IDLE');
+  const [connectionDetail, setConnectionDetail] = useState<string | null>(null);
 
   const isDirty =
     JSON.stringify(formData) !== JSON.stringify(systemSettings);
@@ -102,11 +109,38 @@ export const ETransformationInfoView: React.FC<ETransformationInfoViewProps> = (
   };
 
   const handleTestConnection = () => {
+    if (formData.primaryGibIntegrator !== 'MYSOFT') {
+      setConnectionDetail(null);
+      setTestConnectionStatus('TESTING');
+      setTimeout(() => {
+        setTestConnectionStatus('SUCCESS');
+        setTimeout(() => setTestConnectionStatus('IDLE'), 3500);
+      }, 800);
+      return;
+    }
+
     setTestConnectionStatus('TESTING');
-    setTimeout(() => {
-      setTestConnectionStatus('SUCCESS');
-      setTimeout(() => setTestConnectionStatus('IDLE'), 3500);
-    }, 800);
+    setConnectionDetail(null);
+    void fetchMysoftStatus()
+      .then((status) => {
+        if (!status.authenticated) {
+          setTestConnectionStatus('ERROR');
+          setConnectionDetail(status.error || status.message || 'Mysoft oturumu açılmadı.');
+          return;
+        }
+        const firmCount = status.tenantCount;
+        const firmText = status.message
+          ? status.message
+          : firmCount > 0
+            ? `${firmCount} firma görünüyor.`
+            : 'Oturum açıldı. Bağlı firma listesi boş.';
+        setConnectionDetail(`${status.environment === 'test' ? 'Test' : 'Canlı'} ortam. ${firmText}`);
+        setTestConnectionStatus('SUCCESS');
+      })
+      .catch((error: unknown) => {
+        setTestConnectionStatus('ERROR');
+        setConnectionDetail(error instanceof Error ? error.message : 'Bağlantı kurulamadı.');
+      });
   };
 
   return (
@@ -213,6 +247,11 @@ export const ETransformationInfoView: React.FC<ETransformationInfoViewProps> = (
                     <Check className="w-3.5 h-3.5 text-emerald-600" />
                     <span className="text-emerald-700">Bağlantı Başarılı</span>
                   </>
+                ) : testConnectionStatus === 'ERROR' ? (
+                  <>
+                    <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                    <span className="text-amber-800">Bağlantı kurulamadı</span>
+                  </>
                 ) : (
                   <>
                     <RefreshCw className="w-3.5 h-3.5 text-slate-500" />
@@ -222,6 +261,15 @@ export const ETransformationInfoView: React.FC<ETransformationInfoViewProps> = (
               </button>
             </div>
           </div>
+          {connectionDetail && (
+            <p
+              className={`text-xs ${
+                testConnectionStatus === 'ERROR' ? 'text-amber-800' : 'text-slate-600'
+              }`}
+            >
+              {connectionDetail}
+            </p>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
             <div className="lg:col-span-2">

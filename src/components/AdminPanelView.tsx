@@ -116,6 +116,7 @@ const CATEGORY_LABELS: Record<AuditActionCategory, string> = {
 const INTEGRATOR_NAMES: Record<EInvoiceIntegrator, string> = {
   FATURANSIT: 'Faturansit Özel Entegratör',
   GIB_PORTAL: 'GİB Portal',
+  MYSOFT: 'Mysoft e-Belge',
 };
 
 export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
