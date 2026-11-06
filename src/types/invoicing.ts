@@ -160,14 +160,27 @@ export type AuditActionCategory =
   | 'PAZARYERI_API'
   | 'SISTEM_AYARI';
 
+export type AuditActionType =
+  | 'CREATE'
+  | 'UPDATE'
+  | 'DELETE'
+  | 'INVOICE'
+  | 'SYNC'
+  | 'EXPORT'
+  | 'SYSTEM';
+
 export interface AuditLogEntry {
   id: string;
   timestamp: string;
   actorName: string;
   actorRole: UserRole;
   category: AuditActionCategory;
+  moduleName?: string;
+  actionType?: AuditActionType;
   summary: string;
+  changeDetails?: string;
   targetReference: string;
+  ipAddress?: string;
   status: 'SUCCESS' | 'WARNING';
 }
 

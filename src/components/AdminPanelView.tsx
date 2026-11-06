@@ -7,9 +7,16 @@ import {
   Search,
   Trash2,
   Save,
+  Activity,
+  FileSpreadsheet,
+  Eye,
+  X,
+  Clock,
+  Filter,
 } from 'lucide-react';
 import {
   AuditActionCategory,
+  AuditActionType,
   AuditLogEntry,
   AutomationRule,
   CompanyProfile,
@@ -113,6 +120,32 @@ const CATEGORY_LABELS: Record<AuditActionCategory, string> = {
   SISTEM_AYARI: 'Sistem & GİB Ayarı',
 };
 
+const ACTION_TYPE_LABELS: Record<AuditActionType, string> = {
+  CREATE: 'Yeni Kayıt / Ekleme',
+  UPDATE: 'Güncelleme / Değişiklik',
+  DELETE: 'Silme / İptal',
+  INVOICE: 'Fatura & GİB Gönderimi',
+  SYNC: 'API Senkronizasyon',
+  EXPORT: 'Excel / Rapor Aktarımı',
+  SYSTEM: 'Sistem & Kayıt',
+};
+
+const ACTION_TYPE_BADGES: Record<AuditActionType, string> = {
+  CREATE: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  UPDATE: 'bg-blue-50 text-blue-700 border-blue-200',
+  DELETE: 'bg-red-50 text-red-700 border-red-200',
+  INVOICE: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+  SYNC: 'bg-amber-50 text-amber-700 border-amber-200',
+  EXPORT: 'bg-teal-50 text-teal-700 border-teal-200',
+  SYSTEM: 'bg-slate-100 text-slate-700 border-slate-200',
+};
+
+const ROLE_LABELS: Record<UserRole, string> = {
+  ADMIN: 'Admin (İşletme Sahibi)',
+  ACCOUNTANT: 'Mali Müşavir / Muhasebe',
+  OPERATIONS: 'Operasyon Uzmanı',
+};
+
 const INTEGRATOR_NAMES: Record<EInvoiceIntegrator, string> = {
   FATURANSIT: 'Faturansit Özel Entegratör',
   GIB_PORTAL: 'GİB Portal',
@@ -171,7 +204,9 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   }, [activeSubTab, initialSubTab]);
 
   const [auditCategoryFilter, setAuditCategoryFilter] = useState<'ALL' | AuditActionCategory>('ALL');
+  const [auditActionTypeFilter, setAuditActionTypeFilter] = useState<'ALL' | AuditActionType>('ALL');
   const [auditSearch, setAuditSearch] = useState('');
+  const [selectedLogForDetail, setSelectedLogForDetail] = useState<AuditLogEntry | null>(null);
 
   const adminStats = useMemo(() => {
     const activeUsersCount = users.filter((u) => u.isActive).length;
@@ -195,6 +230,21 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
     };
   }, [users]);
 
+  const logStats = useMemo(() => {
+    const totalLogs = auditLogs.length;
+    const invoiceMovements = auditLogs.filter(
+      (l) => l.category === 'FATURA_KESIMI' || l.actionType === 'INVOICE'
+    ).length;
+    const dataChanges = auditLogs.filter(
+      (l) =>
+        l.actionType === 'UPDATE' ||
+        l.actionType === 'CREATE' ||
+        l.actionType === 'DELETE'
+    ).length;
+    const warningCount = auditLogs.filter((l) => l.status === 'WARNING').length;
+    return { totalLogs, invoiceMovements, dataChanges, warningCount };
+  }, [auditLogs]);
+
   const filteredLogs = useMemo(() => {
     return auditLogs.filter((log) => {
       if (
@@ -203,17 +253,70 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       ) {
         return false;
       }
+      if (
+        auditActionTypeFilter !== 'ALL' &&
+        (log.actionType ?? 'SYSTEM') !== auditActionTypeFilter
+      ) {
+        return false;
+      }
       if (auditSearch.trim()) {
         const q = auditSearch.toLowerCase().trim();
         return (
           log.summary.toLowerCase().includes(q) ||
           log.actorName.toLowerCase().includes(q) ||
-          log.targetReference.toLowerCase().includes(q)
+          log.targetReference.toLowerCase().includes(q) ||
+          (log.moduleName ?? '').toLowerCase().includes(q) ||
+          (log.changeDetails ?? '').toLowerCase().includes(q) ||
+          (log.ipAddress ?? '').toLowerCase().includes(q)
         );
       }
       return true;
     });
-  }, [auditLogs, auditCategoryFilter, auditSearch]);
+  }, [auditLogs, auditCategoryFilter, auditActionTypeFilter, auditSearch]);
+
+  const handleExportLogsCsv = () => {
+    const headers = [
+      'Log ID',
+      'Zaman Damgasi',
+      'Islemi Yapan (Aktor)',
+      'Yetki Rolu',
+      'Modul / Alt Modul',
+      'Kategori',
+      'Hareket Tipi',
+      'Islem Ozeti',
+      'Yapilan Degisiklik & Parametre Detayi',
+      'Hedef Referans Kodu',
+      'IP Adresi',
+      'Durum',
+    ];
+    const escapeCell = (val: string) => `"${(val || '').replace(/"/g, '""')}"`;
+    const rows = filteredLogs.map((log) => [
+      escapeCell(log.id),
+      escapeCell(log.timestamp),
+      escapeCell(log.actorName),
+      escapeCell(ROLE_LABELS[log.actorRole] ?? log.actorRole),
+      escapeCell(log.moduleName ?? CATEGORY_LABELS[log.category]),
+      escapeCell(CATEGORY_LABELS[log.category]),
+      escapeCell(ACTION_TYPE_LABELS[log.actionType ?? 'SYSTEM']),
+      escapeCell(log.summary),
+      escapeCell(log.changeDetails ?? log.summary),
+      escapeCell(log.targetReference),
+      escapeCell(log.ipAddress ?? '127.0.0.1'),
+      escapeCell(log.status === 'SUCCESS' ? 'BASARILI' : 'UYARI'),
+    ]);
+
+    const csvContent =
+      '\uFEFF' + [headers.join(';'), ...rows.map((r) => r.join(';'))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `admin-log-izleme-hareketleri-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="space-y-6">
@@ -221,13 +324,21 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
       {/* Pascal Hero Banner */}
       <PascalHeroBanner
         kicker="MERKEZİ SİSTEM & E-DÖNÜŞÜM YÖNETİMİ"
-        title="Platform Yönetim & Denetim Paneli"
-        subtitle="Mükellef kontör havuzu, E-Dönüşüm bilgileri, pazaryeri API yetkileri ve GİB denetim kayıtları."
+        title={
+          subTab === 'audit'
+            ? 'Admin Log İzleme & Sistem Hareketleri'
+            : 'Platform Yönetim & Denetim Paneli'
+        }
+        subtitle={
+          subTab === 'audit'
+            ? 'Platform üzerindeki tüm modüllerde yapılan değişiklikleri, kullanıcı işlemlerini, fatura kesimlerini ve API hareketlerini anlık izleyin.'
+            : 'Mükellef kontör havuzu, E-Dönüşüm bilgileri, pazaryeri API yetkileri ve canlı log izleme merkezi.'
+        }
         onSaveAction={onSaveAllModules ? () => onSaveAllModules('Admin Paneli') : undefined}
         saveLabel={hasUnsavedChanges ? 'Değişiklikleri Kaydet' : 'Tüm Modülleri Kaydet'}
         hasUnsavedChanges={hasUnsavedChanges}
-        primaryLabel="E-Dönüşüm Bilgileri"
-        onPrimaryAction={() => setSubTab('edoc_settings')}
+        primaryLabel={subTab === 'audit' ? 'E-Dönüşüm Bilgileri' : 'Canlı Log İzleme'}
+        onPrimaryAction={() => setSubTab(subTab === 'audit' ? 'edoc_settings' : 'audit')}
       />
 
       {/* 4-Column Admin KPI Strip */}
@@ -261,13 +372,49 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
         />
 
         <PascalKpiCard
-          title="GİB çalışma modu & stopaj"
-          value={systemSettings.environmentMode === 'PRODUCTION' ? 'CANLI ORTAM' : 'TEST ORTAMI'}
+          title="Canlı log & sistem hareketi"
+          value={`${auditLogs.length} kayıt`}
           tone="rose"
-          pillText={`%${systemSettings.defaultWithholdingRate} Stopaj`}
-          subtitle="GİB UBL-TR 2.1 entegrasyonu"
-          icon={<AlertTriangle className="w-5 h-5" />}
+          pillText="Canlı İzleme"
+          subtitle="tüm modül değişiklikleri & hareketler"
+          icon={<Activity className="w-5 h-5" />}
         />
+      </div>
+
+      {/* Admin Sub-Module Navigation Bar */}
+      <div className="bg-white border border-slate-200/90 rounded-xl p-2 flex flex-wrap items-center gap-1.5 shadow-2xs">
+        {(
+          [
+            { id: 'audit', label: 'Log İzleme (Tüm Hareketler)', badge: `${auditLogs.length}` },
+          ] as const
+        ).map((item) => {
+          const active = subTab === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setSubTab(item.id)}
+              className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                active
+                  ? 'bg-[#0478bd] text-white shadow-xs'
+                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+              }`}
+            >
+              <span>{item.label}</span>
+              {'badge' in item && item.badge && (
+                <span
+                  className={`px-1.5 py-0.5 text-[10px] font-bold rounded-full ${
+                    active
+                      ? 'bg-white/20 text-white'
+                      : 'bg-emerald-100 text-emerald-800'
+                  }`}
+                >
+                  {item.badge}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* Sub-Tab 1: Users, Quota & Marketplace Integrations */}
@@ -498,18 +645,139 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
         </div>
       )}
 
-      {/* Sub-Tab 3: System & GİB Audit Logs */}
+      {/* Sub-Tab 4: Log İzleme (Tüm Sistem Hareketleri & Değişiklik Kayıtları) */}
       {subTab === 'audit' && (
         <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3.5 border border-slate-200 rounded-lg">
+          {/* Log İzleme Header & Live Status Banner */}
+          <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center text-[#0478bd] shrink-0">
+                <Activity className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2.5 flex-wrap">
+                  <h2 className="text-sm font-bold text-slate-900">
+                    Admin Log İzleme Merkezi (Tüm Değişiklikler & Sistem Hareketleri)
+                  </h2>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    CANLI LOG İZLEME AKTİF
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mt-1">
+                  Admin yetkisiyle platformdaki tüm modüllerde yapılan veri değişikliklerini (eski/yeni değerler), fatura kesimlerini, kullanıcı/kontör işlemlerini ve API hareketlerini tek ekrandan izleyin.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0 flex-wrap">
+              <button
+                type="button"
+                onClick={handleExportLogsCsv}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-emerald-500/70 bg-white text-emerald-700 hover:bg-emerald-50/70 transition-colors cursor-pointer"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Logları Excel (CSV) İndir</span>
+              </button>
+
+              {onSaveAllModules && (
+                <button
+                  type="button"
+                  onClick={() => onSaveAllModules('Log İzleme & Sistem Hareketleri')}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
+                    hasUnsavedChanges
+                      ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-xs'
+                      : 'bg-[#0478bd] text-white hover:bg-[#0369a1]'
+                  }`}
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Log Kayıtlarını Kaydet</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* 4 Mini Summary Cards for Log İzleme */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="bg-white border border-slate-200 rounded-xl p-3.5 flex items-center justify-between">
+              <div>
+                <div className="text-[11px] font-medium text-slate-500">
+                  Toplam İzlenen Hareket
+                </div>
+                <div className="text-lg font-bold font-mono text-slate-900 mt-0.5">
+                  {logStats.totalLogs} Kayıt
+                </div>
+                <div className="text-[11px] text-emerald-700 font-medium mt-0.5">
+                  Filtrelenen: {filteredLogs.length} hareket
+                </div>
+              </div>
+              <div className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center text-slate-700">
+                <Clock className="w-4 h-4" />
+              </div>
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-xl p-3.5 flex items-center justify-between">
+              <div>
+                <div className="text-[11px] font-medium text-slate-500">
+                  Veri Değişikliği (Ekleme / Güncelleme / Silme)
+                </div>
+                <div className="text-lg font-bold font-mono text-blue-700 mt-0.5">
+                  {logStats.dataChanges} Değişiklik
+                </div>
+                <div className="text-[11px] text-slate-500 mt-0.5">
+                  Önceki / sonraki değer detaylı
+                </div>
+              </div>
+              <div className="w-9 h-9 rounded-lg bg-blue-50 flex items-center justify-center text-blue-700">
+                <Filter className="w-4 h-4" />
+              </div>
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-xl p-3.5 flex items-center justify-between">
+              <div>
+                <div className="text-[11px] font-medium text-slate-500">
+                  e-Belge & Fatura Hareketleri
+                </div>
+                <div className="text-lg font-bold font-mono text-indigo-700 mt-0.5">
+                  {logStats.invoiceMovements} İşlem
+                </div>
+                <div className="text-[11px] text-slate-500 mt-0.5">
+                  GİB UBL-TR & ETTN kayıtları
+                </div>
+              </div>
+              <div className="w-9 h-9 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-700">
+                <CheckCircle2 className="w-4 h-4" />
+              </div>
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-xl p-3.5 flex items-center justify-between">
+              <div>
+                <div className="text-[11px] font-medium text-slate-500">
+                  Uyarı & Kritik Hareketler
+                </div>
+                <div className="text-lg font-bold font-mono text-amber-700 mt-0.5">
+                  {logStats.warningCount} Uyarı
+                </div>
+                <div className="text-[11px] text-slate-500 mt-0.5">
+                  Silme / askıya alma / VKN uyarıları
+                </div>
+              </div>
+              <div className="w-9 h-9 rounded-lg bg-amber-50 flex items-center justify-center text-amber-700">
+                <AlertTriangle className="w-4 h-4" />
+              </div>
+            </div>
+          </div>
+
+          {/* Filter Bar: Categories + Action Type + Search */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white p-3.5 border border-slate-200 rounded-xl">
             <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg overflow-x-auto">
               {(
                 [
-                  { id: 'ALL', label: 'Tüm Kayıtlar' },
+                  { id: 'ALL', label: 'Tüm Hareketler' },
                   { id: 'FATURA_KESIMI', label: 'e-Belge & Fatura' },
                   { id: 'KULLANICI_YETKI', label: 'Kullanıcı & Kontör' },
                   { id: 'PAZARYERI_API', label: 'Pazaryeri API' },
-                  { id: 'SISTEM_AYARI', label: 'Sistem Ayarları' },
+                  { id: 'SISTEM_AYARI', label: 'Sistem & Şirket Ayarları' },
                 ] as const
               ).map((tab) => (
                 <button
@@ -518,7 +786,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
                   onClick={() => setAuditCategoryFilter(tab.id)}
                   className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                     auditCategoryFilter === tab.id
-                      ? 'bg-white text-slate-900 shadow-xs'
+                      ? 'bg-white text-slate-900 shadow-xs font-semibold'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
@@ -527,87 +795,267 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
               ))}
             </div>
 
-            <div className="flex items-center gap-2">
-              {onSaveAllModules && (
-                <button
-                  type="button"
-                  onClick={() => onSaveAllModules('Denetim & Sistem Kayıtları')}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap cursor-pointer ${
-                    hasUnsavedChanges
-                      ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-xs'
-                      : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-50'
-                  }`}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+              <div>
+                <label htmlFor="audit-action-type-select" className="sr-only">
+                  Hareket Tipi Filtresi
+                </label>
+                <select
+                  id="audit-action-type-select"
+                  value={auditActionTypeFilter}
+                  onChange={(e) =>
+                    setAuditActionTypeFilter(e.target.value as 'ALL' | AuditActionType)
+                  }
+                  className="w-full sm:w-auto px-3 py-1.5 text-xs font-medium bg-slate-50 border border-slate-300 rounded-lg text-slate-700"
                 >
-                  <Save className="w-3.5 h-3.5" />
-                  <span>Kayıtları Kaydet</span>
-                </button>
-              )}
-            </div>
+                  <option value="ALL">Tüm İşlem Tipleri</option>
+                  <option value="UPDATE">Güncelleme / Değişiklik</option>
+                  <option value="CREATE">Yeni Kayıt / Ekleme</option>
+                  <option value="DELETE">Silme / İptal</option>
+                  <option value="INVOICE">Fatura & GİB Gönderimi</option>
+                  <option value="SYNC">API Senkronizasyon</option>
+                  <option value="EXPORT">Excel / Rapor Aktarımı</option>
+                  <option value="SYSTEM">Sistem & Kayıt</option>
+                </select>
+              </div>
 
-            <div className="relative sm:w-64">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <label htmlFor="audit-search-input" className="sr-only">
-                Denetim kayıtlarında ara
-              </label>
-              <input
-                id="audit-search-input"
-                type="search"
-                value={auditSearch}
-                onChange={(e) => setAuditSearch(e.target.value)}
-                placeholder="Kullanıcı, GİB no veya işlem ara..."
-                className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg"
-              />
+              <div className="relative sm:w-72">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <label htmlFor="audit-search-input" className="sr-only">
+                  Log kayıtlarında ara
+                </label>
+                <input
+                  id="audit-search-input"
+                  type="search"
+                  value={auditSearch}
+                  onChange={(e) => setAuditSearch(e.target.value)}
+                  placeholder="Modül, kullanıcı, değişiklik detayı, IP veya referans ara..."
+                  className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg"
+                />
+              </div>
             </div>
           </div>
 
-          <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+          {/* Comprehensive Log Monitoring Table */}
+          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
             <div className="overflow-x-auto">
               <table className="w-full text-xs text-left border-collapse">
                 <thead>
-                  <tr className="border-b border-slate-200 bg-slate-50 text-slate-600 font-semibold">
-                    <th className="py-2.5 px-4">Zaman Damgası</th>
-                    <th className="py-2.5 px-3">İşlemi Yapan (Aktör)</th>
-                    <th className="py-2.5 px-3">Kategori</th>
-                    <th className="py-2.5 px-3">İşlem Açıklaması</th>
-                    <th className="py-2.5 px-3">Referans Kodu</th>
-                    <th className="py-2.5 px-4 text-right">Durum</th>
+                  <tr className="border-b border-slate-200 bg-slate-50 text-slate-600 font-semibold uppercase tracking-wider text-[11px]">
+                    <th className="py-3 px-4">Zaman Damgası & IP</th>
+                    <th className="py-3 px-3">İşlemi Yapan (Aktör & Rol)</th>
+                    <th className="py-3 px-3">Modül / Alt Modül</th>
+                    <th className="py-3 px-3">Hareket Tipi</th>
+                    <th className="py-3 px-3 min-w-[320px]">
+                      Yapılan Değişiklik & Hareket Detayı
+                    </th>
+                    <th className="py-3 px-3">Referans Kodu</th>
+                    <th className="py-3 px-4 text-right">Durum & İncele</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
-                  {filteredLogs.map((log) => (
-                    <tr key={log.id} className="hover:bg-slate-50/70">
-                      <td className="py-2.5 px-4 font-mono text-slate-600 whitespace-nowrap">
-                        {log.timestamp}
-                      </td>
-                      <td className="py-2.5 px-3 font-medium text-slate-900 whitespace-nowrap">
-                        {log.actorName}
-                      </td>
-                      <td className="py-2.5 px-3 text-slate-600 whitespace-nowrap">
-                        {CATEGORY_LABELS[log.category]}
-                      </td>
-                      <td className="py-2.5 px-3 text-slate-800">
-                        {log.summary}
-                      </td>
-                      <td className="py-2.5 px-3 font-mono text-slate-700 whitespace-nowrap">
-                        {log.targetReference}
-                      </td>
-                      <td className="py-2.5 px-4 text-right whitespace-nowrap">
-                        {log.status === 'SUCCESS' ? (
-                          <span className="inline-flex items-center gap-1 font-semibold text-emerald-700">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            Başarılı
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 font-semibold text-amber-700">
-                            <AlertTriangle className="w-3.5 h-3.5" />
-                            Uyarı
-                          </span>
-                        )}
+                  {filteredLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-10 text-center text-slate-500">
+                        Seçilen filtre kriterlerine uygun sistem hareketi veya değişiklik logu bulunamadı.
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    filteredLogs.map((log) => {
+                      const actionType: AuditActionType = log.actionType ?? 'SYSTEM';
+                      return (
+                        <tr key={log.id} className="hover:bg-slate-50/80 align-top">
+                          <td className="py-3 px-4 font-mono text-slate-700 whitespace-nowrap">
+                            <div className="font-semibold text-slate-900">
+                              {log.timestamp}
+                            </div>
+                            <div className="text-[10px] text-slate-400 mt-0.5">
+                              IP: {log.ipAddress ?? '192.168.1.10'} · #{log.id}
+                            </div>
+                          </td>
+
+                          <td className="py-3 px-3 whitespace-nowrap">
+                            <div className="font-semibold text-slate-900">
+                              {log.actorName}
+                            </div>
+                            <div className="text-[11px] text-slate-500 mt-0.5">
+                              {ROLE_LABELS[log.actorRole] ?? log.actorRole}
+                            </div>
+                          </td>
+
+                          <td className="py-3 px-3 whitespace-nowrap">
+                            <div className="font-semibold text-slate-800">
+                              {log.moduleName ?? CATEGORY_LABELS[log.category]}
+                            </div>
+                            <div className="text-[11px] text-slate-500 mt-0.5">
+                              {CATEGORY_LABELS[log.category]}
+                            </div>
+                          </td>
+
+                          <td className="py-3 px-3 whitespace-nowrap">
+                            <span
+                              className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold border ${ACTION_TYPE_BADGES[actionType]}`}
+                            >
+                              {ACTION_TYPE_LABELS[actionType]}
+                            </span>
+                          </td>
+
+                          <td className="py-3 px-3 text-slate-800">
+                            <div className="font-semibold text-slate-900 leading-snug">
+                              {log.summary}
+                            </div>
+                            {log.changeDetails && (
+                              <div className="mt-1.5 px-2.5 py-1.5 bg-slate-50 border border-slate-200/90 rounded-md text-[11px] font-mono text-slate-600 leading-relaxed">
+                                <span className="font-semibold text-slate-700">
+                                  Değişiklik Detayı:{' '}
+                                </span>
+                                {log.changeDetails}
+                              </div>
+                            )}
+                          </td>
+
+                          <td className="py-3 px-3 font-mono text-slate-700 whitespace-nowrap">
+                            <span className="px-2 py-0.5 bg-slate-100 border border-slate-200 rounded text-[11px] font-semibold text-slate-800">
+                              {log.targetReference}
+                            </span>
+                          </td>
+
+                          <td className="py-3 px-4 text-right whitespace-nowrap">
+                            <div className="flex flex-col items-end gap-1.5">
+                              {log.status === 'SUCCESS' ? (
+                                <span className="inline-flex items-center gap-1 font-semibold text-emerald-700">
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  Başarılı
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 font-semibold text-amber-700">
+                                  <AlertTriangle className="w-3.5 h-3.5" />
+                                  Uyarı
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => setSelectedLogForDetail(log)}
+                                className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-[#0478bd] bg-blue-50 hover:bg-blue-100 rounded-md transition-colors cursor-pointer"
+                              >
+                                <Eye className="w-3 h-3" />
+                                <span>Detay</span>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Log İzleme Detay Modalı */}
+      {selectedLogForDetail && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="log-detail-modal-title"
+        >
+          <div className="bg-white rounded-xl shadow-xl border border-slate-200 max-w-xl w-full p-6 space-y-4">
+            <div className="flex items-start justify-between gap-3 border-b border-slate-200 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-blue-50 text-[#0478bd] rounded-lg">
+                  <Activity className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 id="log-detail-modal-title" className="text-base font-bold text-slate-900">
+                    Sistem Hareket & Değişiklik Log Kaydı
+                  </h3>
+                  <p className="text-xs text-slate-500 font-mono">
+                    Log ID: {selectedLogForDetail.id} · Zaman: {selectedLogForDetail.timestamp}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedLogForDetail(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 cursor-pointer"
+                aria-label="Kapat"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs bg-slate-50 p-4 rounded-xl border border-slate-200">
+              <div>
+                <span className="text-slate-500 block">İşlemi Yapan (Aktör):</span>
+                <span className="font-semibold text-slate-900 mt-0.5 block">
+                  {selectedLogForDetail.actorName}
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-500 block">Kullanıcı Rolü:</span>
+                <span className="font-semibold text-slate-900 mt-0.5 block">
+                  {ROLE_LABELS[selectedLogForDetail.actorRole] ?? selectedLogForDetail.actorRole}
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-500 block">Modül / Alt Modül:</span>
+                <span className="font-semibold text-slate-900 mt-0.5 block">
+                  {selectedLogForDetail.moduleName ?? CATEGORY_LABELS[selectedLogForDetail.category]}
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-500 block">Hareket Tipi & Kategori:</span>
+                <span className="font-semibold text-[#0478bd] mt-0.5 block">
+                  {ACTION_TYPE_LABELS[selectedLogForDetail.actionType ?? 'SYSTEM']} ({CATEGORY_LABELS[selectedLogForDetail.category]})
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-500 block">Hedef Referans Kodu:</span>
+                <span className="font-mono font-semibold text-slate-900 mt-0.5 block">
+                  {selectedLogForDetail.targetReference}
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-500 block">IP Adresi & Durum:</span>
+                <span className="font-mono font-semibold text-slate-900 mt-0.5 block">
+                  {selectedLogForDetail.ipAddress ?? '192.168.1.10'} ·{' '}
+                  {selectedLogForDetail.status === 'SUCCESS' ? 'BAŞARILI' : 'UYARI'}
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-2 text-xs">
+              <div>
+                <span className="font-semibold text-slate-700 block mb-1">
+                  Hareket Özeti:
+                </span>
+                <div className="p-3 bg-white border border-slate-200 rounded-lg text-slate-900 font-medium">
+                  {selectedLogForDetail.summary}
+                </div>
+              </div>
+
+              <div>
+                <span className="font-semibold text-slate-700 block mb-1">
+                  Yapılan Değişiklik & Teknik Parametre Detayı:
+                </span>
+                <div className="p-3 bg-slate-900 text-emerald-300 font-mono text-[11px] rounded-lg leading-relaxed whitespace-pre-wrap">
+                  {selectedLogForDetail.changeDetails ??
+                    'Bu işlem için ek parametre değişikliği kaydı bulunmamaktadır.'}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setSelectedLogForDetail(null)}
+                className="px-4 py-2 text-xs font-semibold text-white bg-[#0478bd] hover:bg-[#0369a1] rounded-lg transition-colors cursor-pointer"
+              >
+                Kapat
+              </button>
             </div>
           </div>
         </div>

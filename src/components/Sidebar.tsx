@@ -134,8 +134,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'audit',
-      label: 'Denetim Kayıtları',
+      label: 'Log İzleme',
       icon: FileSearch,
+      badge: 'CANLI',
     },
   ];
 

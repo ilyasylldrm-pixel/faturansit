@@ -21,6 +21,7 @@ import {
 import {
   AppOwnerProfile,
   AuditActionCategory,
+  AuditActionType,
   AuditLogEntry,
   AutomationRule,
   CompanyProfile,
@@ -108,16 +109,46 @@ export default function App() {
     summary: string,
     targetReference: string,
     status: 'SUCCESS' | 'WARNING' = 'SUCCESS',
-    actorName = 'Kaan Özdemir (Admin)'
+    options?: {
+      actorName?: string;
+      moduleName?: string;
+      actionType?: AuditActionType;
+      changeDetails?: string;
+    }
   ) => {
+    const now = new Date();
+    const datePart = now.toISOString().slice(0, 10);
+    const timePart = now.toLocaleTimeString('tr-TR', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+    const defaultModuleMap: Record<AuditActionCategory, string> = {
+      FATURA_KESIMI: 'E Belge & Fatura Kuyruğu',
+      KULLANICI_YETKI: 'Kullanıcı & Entegrasyon',
+      PAZARYERI_API: 'Pazaryeri Mağazaları',
+      SISTEM_AYARI: 'Sistem & E-Dönüşüm Ayarları',
+    };
+    const defaultActionMap: Record<AuditActionCategory, AuditActionType> = {
+      FATURA_KESIMI: 'INVOICE',
+      KULLANICI_YETKI: 'UPDATE',
+      PAZARYERI_API: 'SYNC',
+      SISTEM_AYARI: 'UPDATE',
+    };
     const entry: AuditLogEntry = {
       id: `log-${Date.now()}-${Math.floor(100 + Math.random() * 899)}`,
-      timestamp: '2026-11-05 10:55',
-      actorName,
+      timestamp: `${datePart} ${timePart}`,
+      actorName: options?.actorName || 'Kaan Özdemir (Admin)',
       actorRole: 'ADMIN',
       category,
+      moduleName: options?.moduleName || defaultModuleMap[category],
+      actionType: options?.actionType || defaultActionMap[category],
       summary,
+      changeDetails:
+        options?.changeDetails ||
+        `Referans: ${targetReference} | İşlem Durumu: ${status === 'SUCCESS' ? 'Doğrulandı & İşlendi' : 'Kontrol / Uyarı'}`,
       targetReference,
+      ipAddress: '85.105.42.18',
       status,
     };
     setAuditLogs((prev) => [entry, ...prev]);
@@ -125,7 +156,11 @@ export default function App() {
 
   const handleSaveAllModules = (sourceModuleName?: string) => {
     setHasUnsavedChanges(false);
-    const now = new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+    const now = new Date().toLocaleTimeString('tr-TR', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
     setLastSavedTimestamp(now);
     const target = sourceModuleName || 'Tüm modül ve alt modül';
     setBannerMessage({
@@ -134,9 +169,14 @@ export default function App() {
     });
     appendAuditLog(
       'SISTEM_AYARI',
-      `${target} verileri admin tarafından kalıcı olarak doğrulandı ve kaydedildi.`,
+      `${target} üzerinde yapılan tüm değişiklikler ve hareketler kalıcı olarak kaydedildi.`,
       'SISTEM-KAYIT',
-      'SUCCESS'
+      'SUCCESS',
+      {
+        moduleName: target,
+        actionType: 'SYSTEM',
+        changeDetails: `Kaydedilen Modül: ${target} | Zaman: ${now} | Tüm alt modül durumları senkronize edildi`,
+      }
     );
   };
 
@@ -381,6 +421,17 @@ export default function App() {
     setOrders((prev) =>
       prev.map((o) => (o.id === orderId ? repairedOrder : o))
     );
+    appendAuditLog(
+      'FATURA_KESIMI',
+      `#${target.marketplaceOrderNumber} (${target.customerName}) VKN/TCKN bilgisi güncellendi.`,
+      `VKN:${validation.normalizedId}`,
+      'SUCCESS',
+      {
+        moduleName: 'Sipariş & Fatura Kuyruğu',
+        actionType: 'UPDATE',
+        changeDetails: `Eski VKN/TCKN: ${target.taxIdentifier || 'Boş'} → Yeni VKN/TCKN: ${validation.normalizedId} (${customerType})`,
+      }
+    );
     return { success: true };
   };
 
@@ -390,6 +441,17 @@ export default function App() {
       type: 'success',
       text: `#${newOrder.marketplaceOrderNumber} numaralı yeni sipariş fatura kuyruğuna eklendi.`,
     });
+    appendAuditLog(
+      'FATURA_KESIMI',
+      `#${newOrder.marketplaceOrderNumber} (${newOrder.customerName}) manuel sipariş kaydı oluşturuldu.`,
+      `#${newOrder.marketplaceOrderNumber}`,
+      'SUCCESS',
+      {
+        moduleName: 'Sipariş & Fatura Kuyruğu',
+        actionType: 'CREATE',
+        changeDetails: `Alıcı: ${newOrder.customerName} | VKN/TCKN: ${newOrder.taxIdentifier} | Pazaryeri: ${newOrder.marketplace.toUpperCase()}`,
+      }
+    );
   };
 
   const handleCancelEArchiveInvoice = (orderId: string, reason: string) => {
@@ -469,13 +531,41 @@ export default function App() {
   };
 
   const handleToggleRule = (ruleId: string) => {
+    const targetRule = rules.find((r) => r.id === ruleId);
     setRules((prev) =>
       prev.map((r) => (r.id === ruleId ? { ...r, isActive: !r.isActive } : r))
     );
+    if (targetRule) {
+      appendAuditLog(
+        'SISTEM_AYARI',
+        `"${targetRule.name}" otomasyon kuralı durumu değiştirildi.`,
+        targetRule.id,
+        'SUCCESS',
+        {
+          moduleName: 'Admin > Otomasyon Kuralları',
+          actionType: 'UPDATE',
+          changeDetails: `Kural: ${targetRule.name} | Önceki Durum: ${targetRule.isActive ? 'Aktif' : 'Pasif'} → Yeni Durum: ${!targetRule.isActive ? 'Aktif' : 'Pasif'}`,
+        }
+      );
+    }
   };
 
   const handleDeleteRule = (ruleId: string) => {
+    const targetRule = rules.find((r) => r.id === ruleId);
     setRules((prev) => prev.filter((r) => r.id !== ruleId));
+    if (targetRule) {
+      appendAuditLog(
+        'SISTEM_AYARI',
+        `"${targetRule.name}" otomasyon kuralı silindi.`,
+        targetRule.id,
+        'WARNING',
+        {
+          moduleName: 'Admin > Otomasyon Kuralları',
+          actionType: 'DELETE',
+          changeDetails: `Silinen Kural: ${targetRule.name} | Pazaryeri: ${targetRule.marketplace} | Tetikleyici: ${targetRule.triggerStage}`,
+        }
+      );
+    }
   };
 
   const handleAddRule = (
@@ -488,6 +578,17 @@ export default function App() {
       lastTriggeredAt: 'Henüz çalışmadı',
     };
     setRules((prev) => [created, ...prev]);
+    appendAuditLog(
+      'SISTEM_AYARI',
+      `"${created.name}" yeni fatura otomasyon kuralı eklendi.`,
+      created.id,
+      'SUCCESS',
+      {
+        moduleName: 'Admin > Otomasyon Kuralları',
+        actionType: 'CREATE',
+        changeDetails: `Yeni Kural: ${created.name} | Pazaryeri: ${created.marketplace} | Senaryo: ${created.corporateScenario}`,
+      }
+    );
   };
 
   const handleCreateUser = (input: {
@@ -886,6 +987,18 @@ export default function App() {
         }))
       );
     }
+
+    appendAuditLog(
+      'PAZARYERI_API',
+      `${id.toUpperCase()} (${updates.storeName}) mağaza API ve seri ön eki ayarları güncellendi.`,
+      updates.sellerId,
+      'SUCCESS',
+      {
+        moduleName: 'Admin > Pazaryeri Mağazaları',
+        actionType: 'UPDATE',
+        changeDetails: `Mağaza: ${updates.storeName} | Seri Ön Eki: ${updates.invoiceSeriesPrefix} | Komisyon: %${updates.defaultCommissionRate} | Periyot: ${updates.autoSyncIntervalMinutes} dk`,
+      }
+    );
   };
 
   return (
