@@ -163,7 +163,8 @@ export type AuditActionCategory =
   | 'FATURA_KESIMI'
   | 'KULLANICI_YETKI'
   | 'PAZARYERI_API'
-  | 'SISTEM_AYARI';
+  | 'SISTEM_AYARI'
+  | 'STOK_HAREKETI';
 
 export type AuditActionType =
   | 'CREATE'
@@ -444,3 +445,86 @@ export interface TaxCalendarItem {
   description: string;
   amount?: number;
 }
+
+// ============================================================================
+// STOK VE ENVANTER YÖNETİMİ MODÜLÜ TİPLERİ
+// ============================================================================
+
+export type StockStatus = 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK';
+
+export type StockMovementType =
+  | 'PURCHASE_IN' // Satın Alma Girişi
+  | 'SALES_OUT' // Satış Çıkışı (Pazaryeri Siparişi)
+  | 'EINVOICE_IN' // Gelen e-Fatura ile Giriş
+  | 'RETURN_IN' // Müşteri İadesi Girişi
+  | 'TRANSFER' // Depolar Arası Transfer
+  | 'ADJUSTMENT' // Sayım / Stok Düzeltme
+  | 'WASTE_OUT'; // Fire / Hasarlı Çıkış
+
+export interface Warehouse {
+  id: string;
+  name: string;
+  code: string;
+  city: string;
+  district: string;
+  address: string;
+  isDefault: boolean;
+}
+
+export interface StockItem {
+  id: string;
+  sku: string; // Stok Kodu (Benzersiz)
+  barcode: string; // EAN-13 / Barkod
+  name: string; // Ürün Adı
+  category: string; // Kategori
+  brand?: string; // Marka
+  unit: string; // Birim (Adet, Takım, Koli, vb.)
+  vatRate: number; // KDV Oranı (%1, %10, %20)
+  purchasePrice: number; // Alış Fiyatı (KDV Hariç)
+  salePrice: number; // Satış Fiyatı (KDV Dahil)
+  currentStock: number; // Mevcut Fiziksel Stok Miktarı
+  criticalThreshold: number; // Kritik Stok Uyarı Eşiği
+  criticalLevel?: number; // Alternatif kritik eşik alanı
+  status?: StockStatus; // Stok Durumu (IN_STOCK, LOW_STOCK, OUT_OF_STOCK)
+  reservedStock: number; // Rezerve / Siparişte Bekleyen Miktar
+  warehouseId: string; // Depo ID
+  warehouseName: string; // Depo Adı
+  defaultWarehouseId?: string; // Varsayılan Depo ID
+  supplierName?: string; // Tedarikçi Firma Unvanı
+  marketplaceSync: {
+    trendyol: boolean;
+    hepsiburada: boolean;
+    amazon: boolean;
+  };
+  lastMovementDate: string;
+  createdAt: string;
+  notes?: string;
+}
+
+export interface StockMovement {
+  id: string;
+  stockItemId: string;
+  sku: string;
+  productName: string;
+  stockItemName?: string;
+  type: StockMovementType;
+  quantity: number;
+  direction?: 'IN' | 'OUT';
+  previousStock: number;
+  newStock: number;
+  unitPrice?: number;
+  currency?: string;
+  warehouseId?: string;
+  warehouseName?: string;
+  documentNumber?: string; // Fatura No, İrsaliye No, Sipariş No
+  referenceDocumentNo?: string;
+  referenceDocumentType?: string;
+  sourceChannel?: string; // Pazaryeri, Gelen e-Fatura, Depo Sayımı
+  counterpartyName?: string;
+  counterpartyTaxId?: string;
+  notes?: string;
+  actorName?: string;
+  performedBy?: string;
+  timestamp: string;
+}
+

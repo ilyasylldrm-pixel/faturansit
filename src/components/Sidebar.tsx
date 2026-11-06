@@ -23,6 +23,7 @@ import {
   ChevronRight,
   Lock,
   ShoppingCart,
+  Boxes,
 } from 'lucide-react';
 import { ActiveTab } from './TopBar';
 import { AdminSubTab } from './AdminPanelView';
@@ -44,6 +45,8 @@ interface SidebarProps {
   outgoingEFaturaCount?: number;
   outgoingEArsivCount?: number;
   incomingEFaturaCount?: number;
+  stockItemsCount?: number;
+  criticalStockCount?: number;
   appOwnerProfile?: AppOwnerProfile;
   isCollapsed: boolean;
   onToggleCollapse: () => void;
@@ -69,6 +72,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   outgoingEFaturaCount = 0,
   outgoingEArsivCount = 0,
   incomingEFaturaCount = 0,
+  stockItemsCount = 0,
+  criticalStockCount = 0,
   appOwnerProfile,
   isCollapsed,
   onToggleCollapse,
@@ -493,6 +498,36 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </div>
             )}
           </div>
+
+          {/* Stok & Depo Modülü */}
+          <button
+            type="button"
+            onClick={() => onSelectTab('stock')}
+            className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl text-[13px] transition-all cursor-pointer ${
+              activeTab === 'stock'
+                ? 'bg-[#0077CC] text-white font-semibold shadow-sm'
+                : 'text-[#94A3B8] font-medium hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <Boxes className="w-4 h-4 shrink-0" />
+              {!isCollapsed && <span className="truncate">Stok & Depo Modülü</span>}
+            </div>
+            {!isCollapsed && (
+              <div className="flex items-center gap-1.5">
+                {criticalStockCount > 0 ? (
+                  <span className="px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[10px] font-mono">
+                    {criticalStockCount} kritik
+                  </span>
+                ) : stockItemsCount > 0 ? (
+                  <span className="px-1.5 py-0.2 rounded bg-white/10 text-slate-300 text-[10px] font-mono">
+                    {stockItemsCount}
+                  </span>
+                ) : null}
+                <ChevronRight className="w-3.5 h-3.5 opacity-80" />
+              </div>
+            )}
+          </button>
 
           {/* 3. KDV & Cari Mutabakat (Highlighted like Cari Hesaplar) */}
           <button

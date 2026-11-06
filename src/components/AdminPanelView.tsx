@@ -118,6 +118,7 @@ const CATEGORY_LABELS: Record<AuditActionCategory, string> = {
   KULLANICI_YETKI: 'Kullanıcı & Kontör',
   PAZARYERI_API: 'Pazaryeri API',
   SISTEM_AYARI: 'Sistem & GİB Ayarı',
+  STOK_HAREKETI: 'Stok & Depo Hareketi',
 };
 
 const ACTION_TYPE_LABELS: Record<AuditActionType, string> = {

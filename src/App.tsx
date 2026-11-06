@@ -17,6 +17,9 @@ import {
   INITIAL_SYSTEM_SETTINGS,
   INITIAL_TAX_CALENDAR,
   INITIAL_USERS,
+  INITIAL_WAREHOUSES,
+  INITIAL_STOCK_ITEMS,
+  INITIAL_STOCK_MOVEMENTS,
 } from './data/seedData';
 import {
   AppOwnerProfile,
@@ -34,9 +37,13 @@ import {
   MarketplaceOrder,
   PlatformUser,
   SmmmProfile,
+  StockItem,
+  StockMovement,
+  StockMovementType,
   SystemPlatformSettings,
   TaxCalendarItem,
   UserRole,
+  Warehouse,
 } from './types/invoicing';
 import {
   allocateUserInvoiceCredits,
@@ -59,6 +66,7 @@ import { AppOwnerProfileView } from './components/AppOwnerProfileView';
 import { EDocumentModuleView } from './components/EDocumentModuleView';
 import { TaxReconciliationView } from './components/TaxReconciliationView';
 import { AccountantModuleView } from './components/AccountantModuleView';
+import { StockModuleView } from './components/StockModuleView';
 import { GibInvoiceModal } from './components/GibInvoiceModal';
 
 export default function App() {
@@ -93,6 +101,10 @@ export default function App() {
   const [taxCalendar, setTaxCalendar] = useState<TaxCalendarItem[]>(
     INITIAL_TAX_CALENDAR
   );
+  const [stockItems, setStockItems] = useState<StockItem[]>(INITIAL_STOCK_ITEMS);
+  const [stockMovements, setStockMovements] =
+    useState<StockMovement[]>(INITIAL_STOCK_MOVEMENTS);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>(INITIAL_WAREHOUSES);
   const [auditLogs, setAuditLogs] =
     useState<AuditLogEntry[]>(INITIAL_AUDIT_LOGS);
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
@@ -104,6 +116,14 @@ export default function App() {
   } | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false);
   const [, setLastSavedTimestamp] = useState<string>('10:50');
+
+  const criticalStockCount = useMemo(
+    () =>
+      stockItems.filter(
+        (i) => i.currentStock <= (i.criticalThreshold ?? i.criticalLevel ?? 10)
+      ).length,
+    [stockItems]
+  );
 
   const appendAuditLog = (
     category: AuditActionCategory,
@@ -129,12 +149,14 @@ export default function App() {
       KULLANICI_YETKI: 'Kullanıcı & Entegrasyon',
       PAZARYERI_API: 'Pazaryeri Mağazaları',
       SISTEM_AYARI: 'Sistem & E-Dönüşüm Ayarları',
+      STOK_HAREKETI: 'Stok & Depo Modülü',
     };
     const defaultActionMap: Record<AuditActionCategory, AuditActionType> = {
       FATURA_KESIMI: 'INVOICE',
       KULLANICI_YETKI: 'UPDATE',
       PAZARYERI_API: 'SYNC',
       SISTEM_AYARI: 'UPDATE',
+      STOK_HAREKETI: 'UPDATE',
     };
     const entry: AuditLogEntry = {
       id: `log-${Date.now()}-${Math.floor(100 + Math.random() * 899)}`,
@@ -325,6 +347,88 @@ export default function App() {
     }
   };
 
+  const deductStockForOrder = (order: MarketplaceOrder, gibInvoiceNo?: string) => {
+    const docRef = gibInvoiceNo || order.gibInvoiceNumber || order.ettn || `#${order.marketplaceOrderNumber}`;
+    const now = new Date();
+    const dateStr = `${now.toISOString().slice(0, 10)} ${now.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}`;
+
+    setStockItems((prevItems) => {
+      const updatedItems = [...prevItems];
+      const newMovements: StockMovement[] = [];
+
+      for (const item of order.items) {
+        const matchIdx = updatedItems.findIndex(
+          (s) =>
+            (item.sku && s.sku.toLowerCase() === item.sku.toLowerCase()) ||
+            (s.barcode && item.sku && s.barcode === item.sku) ||
+            s.name.toLowerCase().includes(item.title.toLowerCase().slice(0, 15))
+        );
+        if (matchIdx >= 0) {
+          const matched = updatedItems[matchIdx];
+          const newCurrent = Math.max(0, matched.currentStock - item.quantity);
+          const threshold = matched.criticalThreshold ?? matched.criticalLevel ?? 10;
+          const newStatus: 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK' =
+            newCurrent === 0
+              ? 'OUT_OF_STOCK'
+              : newCurrent <= threshold
+              ? 'LOW_STOCK'
+              : 'IN_STOCK';
+
+          const whId = matched.warehouseId || matched.defaultWarehouseId || 'wh-1';
+          const whName =
+            matched.warehouseName ||
+            warehouses.find((w) => w.id === whId)?.name ||
+            'Ana Merkez Depo';
+
+          updatedItems[matchIdx] = {
+            ...matched,
+            currentStock: newCurrent,
+            status: newStatus,
+            lastMovementDate: dateStr,
+          };
+
+          newMovements.push({
+            id: `mov-${Date.now()}-${Math.floor(100 + Math.random() * 899)}`,
+            stockItemId: matched.id,
+            stockItemName: matched.name,
+            productName: matched.name,
+            sku: matched.sku,
+            type: 'SALES_OUT',
+            direction: 'OUT',
+            warehouseId: whId,
+            warehouseName: whName,
+            quantity: item.quantity,
+            previousStock: matched.currentStock,
+            newStock: newCurrent,
+            unitPrice: item.unitPriceVatIncluded / (1 + item.vatRate / 100),
+            currency: 'TRY',
+            referenceDocumentType: 'E_ARŞİV_FATURA',
+            referenceDocumentNo: docRef,
+            documentNumber: docRef,
+            counterpartyName: order.customerName,
+            counterpartyTaxId: order.taxIdentifier,
+            notes: `${order.marketplace.toUpperCase()} #${order.marketplaceOrderNumber} siparişi faturalandırıldı`,
+            timestamp: dateStr,
+            actorName: 'Kaan Özdemir (Admin)',
+            performedBy: 'Kaan Özdemir (Admin)',
+          });
+        }
+      }
+
+      if (newMovements.length > 0) {
+        setStockMovements((prev) => [...newMovements, ...prev]);
+        appendAuditLog(
+          'STOK_HAREKETI',
+          `Sipariş #${order.marketplaceOrderNumber} (${docRef}) için ${newMovements.length} kalem ürün stoktan düşüldü.`,
+          docRef,
+          'SUCCESS'
+        );
+      }
+
+      return updatedItems;
+    });
+  };
+
   const handleIssueSingleInvoice = (
     orderId: string,
     allowDefaultTckn = false
@@ -338,6 +442,7 @@ export default function App() {
         if (result.success) {
           setSelectedOrderIds((prev) => prev.filter((id) => id !== orderId));
           const gibNo = result.order.gibInvoiceNumber || result.order.ettn || 'Mysoft';
+          deductStockForOrder(target, gibNo);
           setBannerMessage({
             type: 'success',
             text: `#${target.marketplaceOrderNumber} siparişi Mysoft'a iletildi (${gibNo}).`,
@@ -378,6 +483,7 @@ export default function App() {
       setInvoiceSequence((seq) => seq + 1);
       setSelectedOrderIds((prev) => prev.filter((id) => id !== orderId));
       const gibNo = result.updatedOrder.gibInvoiceNumber ?? 'GIB';
+      deductStockForOrder(target, gibNo);
 
       setBannerMessage({
         type: 'success',
@@ -416,8 +522,12 @@ export default function App() {
           if (index < 0 || next[index].invoiceStatus === 'INVOICED') continue;
           const result = await pushOrderToMysoft(next[index], true);
           next[index] = result.order;
-          if (result.success) successCount += 1;
-          else failCount += 1;
+          if (result.success) {
+            successCount += 1;
+            deductStockForOrder(next[index], result.order.gibInvoiceNumber || result.order.ettn);
+          } else {
+            failCount += 1;
+          }
         }
         setOrders(next);
         setSelectedOrderIds([]);
@@ -456,6 +566,7 @@ export default function App() {
       if (res.success) {
         currentSeq += 1;
         successCount += 1;
+        deductStockForOrder(order, res.updatedOrder.gibInvoiceNumber);
       } else {
         failCount += 1;
       }
@@ -496,6 +607,16 @@ export default function App() {
     setOrders(res.updatedOrders);
     setRules(res.updatedRules);
     setInvoiceSequence(res.nextSequence);
+
+    if (res.invoicedCount > 0) {
+      res.updatedOrders.forEach((newOrder) => {
+        const old = orders.find((o) => o.id === newOrder.id);
+        if (old && old.invoiceStatus !== 'INVOICED' && newOrder.invoiceStatus === 'INVOICED') {
+          deductStockForOrder(newOrder, newOrder.gibInvoiceNumber);
+        }
+      });
+    }
+
     setBannerMessage({
       type: res.invoicedCount > 0 ? 'success' : 'warning',
       text: `Otomasyon kuralları çalıştırıldı: ${res.invoicedCount} bekleyen sipariş GİB e-Belge olarak resmileştirildi.`,
@@ -1182,6 +1303,231 @@ export default function App() {
     );
   };
 
+  const handleAddStockItem = (
+    itemData: Omit<StockItem, 'id' | 'createdAt' | 'lastMovementDate' | 'reservedStock'>
+  ) => {
+    const now = new Date();
+    const dateStr = `${now.toISOString().slice(0, 10)} ${now.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}`;
+    const newItemId = `stk-${Date.now().toString().slice(-4)}`;
+    const threshold = itemData.criticalThreshold ?? itemData.criticalLevel ?? 10;
+    const status: 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK' =
+      itemData.currentStock === 0
+        ? 'OUT_OF_STOCK'
+        : itemData.currentStock <= threshold
+        ? 'LOW_STOCK'
+        : 'IN_STOCK';
+
+    const whId = itemData.warehouseId || itemData.defaultWarehouseId || 'wh-1';
+    const whName =
+      itemData.warehouseName ||
+      warehouses.find((w) => w.id === whId)?.name ||
+      'Ana Merkez Depo';
+
+    const newItem: StockItem = {
+      ...itemData,
+      id: newItemId,
+      status,
+      warehouseId: whId,
+      warehouseName: whName,
+      criticalThreshold: threshold,
+      reservedStock: 0,
+      createdAt: dateStr,
+      lastMovementDate: dateStr,
+    };
+
+    setStockItems((prev) => [newItem, ...prev]);
+
+    if (itemData.currentStock > 0) {
+      const initMovement: StockMovement = {
+        id: `mov-${Date.now()}`,
+        stockItemId: newItemId,
+        stockItemName: newItem.name,
+        productName: newItem.name,
+        sku: newItem.sku,
+        type: 'PURCHASE_IN',
+        direction: 'IN',
+        warehouseId: whId,
+        warehouseName: whName,
+        quantity: itemData.currentStock,
+        previousStock: 0,
+        newStock: itemData.currentStock,
+        unitPrice: itemData.purchasePrice,
+        currency: 'TRY',
+        referenceDocumentType: 'SAYIM_GİRİŞİ',
+        referenceDocumentNo: `AÇILIŞ-${newItem.sku}`,
+        documentNumber: `AÇILIŞ-${newItem.sku}`,
+        counterpartyName: newItem.supplierName || 'Açılış Envanter Sayımı',
+        notes: 'Yeni stok kartı açılış miktarı eklendi.',
+        timestamp: dateStr,
+        actorName: 'Kaan Özdemir (Admin)',
+        performedBy: 'Kaan Özdemir (Admin)',
+      };
+      setStockMovements((prev) => [initMovement, ...prev]);
+    }
+
+    setBannerMessage({
+      type: 'success',
+      text: `"${newItem.name}" (${newItem.sku}) stok kartı başarıyla tanımlandı.`,
+    });
+    appendAuditLog(
+      'STOK_HAREKETI',
+      `Yeni stok kartı açıldı: ${newItem.name} (${newItem.sku}) - Başlangıç: ${newItem.currentStock} ${newItem.unit}`,
+      newItem.sku,
+      'SUCCESS'
+    );
+  };
+
+  const handleUpdateStockItem = (updated: StockItem) => {
+    const threshold = updated.criticalThreshold ?? updated.criticalLevel ?? 10;
+    const status: 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK' =
+      updated.currentStock === 0
+        ? 'OUT_OF_STOCK'
+        : updated.currentStock <= threshold
+        ? 'LOW_STOCK'
+        : 'IN_STOCK';
+
+    const itemWithStatus: StockItem = {
+      ...updated,
+      status,
+      criticalThreshold: threshold,
+    };
+
+    setStockItems((prev) => prev.map((item) => (item.id === itemWithStatus.id ? itemWithStatus : item)));
+    setBannerMessage({
+      type: 'success',
+      text: `"${itemWithStatus.name}" stok kartı bilgileri güncellendi.`,
+    });
+    appendAuditLog(
+      'STOK_HAREKETI',
+      `Stok kartı güncellendi: ${itemWithStatus.name} (${itemWithStatus.sku})`,
+      itemWithStatus.sku,
+      'SUCCESS'
+    );
+  };
+
+  const handleDeleteStockItem = (id: string) => {
+    const target = stockItems.find((i) => i.id === id);
+    if (!target) return;
+    setStockItems((prev) => prev.filter((i) => i.id !== id));
+    setBannerMessage({
+      type: 'success',
+      text: `"${target.name}" (${target.sku}) stok kartı silindi.`,
+    });
+    appendAuditLog(
+      'STOK_HAREKETI',
+      `Stok kartı silindi: ${target.name} (${target.sku})`,
+      target.sku,
+      'WARNING'
+    );
+  };
+
+  const handleAddStockMovement = (
+    movementData: Omit<StockMovement, 'id' | 'timestamp'>
+  ) => {
+    const now = new Date();
+    const dateStr = `${now.toISOString().slice(0, 10)} ${now.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}`;
+    const newMovementId = `mov-${Date.now()}-${Math.floor(100 + Math.random() * 899)}`;
+
+    const targetItem = stockItems.find((i) => i.id === movementData.stockItemId);
+    const prevStock = targetItem ? targetItem.currentStock : 0;
+
+    const isOut = ['SALES_OUT', 'WASTE_OUT'].includes(movementData.type);
+    const isIn = ['PURCHASE_IN', 'EINVOICE_IN', 'RETURN_IN'].includes(movementData.type);
+    const newStock = isOut
+      ? Math.max(0, prevStock - movementData.quantity)
+      : isIn
+      ? prevStock + movementData.quantity
+      : movementData.newStock;
+
+    const prodName = movementData.productName || movementData.stockItemName || targetItem?.name || 'Ürün';
+    const docNo = movementData.documentNumber || movementData.referenceDocumentNo || '-';
+
+    const movement: StockMovement = {
+      ...movementData,
+      id: newMovementId,
+      productName: prodName,
+      stockItemName: prodName,
+      direction: isOut ? 'OUT' : 'IN',
+      documentNumber: docNo,
+      referenceDocumentNo: docNo,
+      previousStock: prevStock,
+      newStock,
+      timestamp: dateStr,
+      actorName: movementData.actorName || 'Kaan Özdemir (Admin)',
+      performedBy: 'Kaan Özdemir (Admin)',
+    };
+
+    setStockMovements((prev) => [movement, ...prev]);
+
+    if (targetItem) {
+      const threshold = targetItem.criticalThreshold ?? targetItem.criticalLevel ?? 10;
+      const newStatus: 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK' =
+        newStock === 0
+          ? 'OUT_OF_STOCK'
+          : newStock <= threshold
+          ? 'LOW_STOCK'
+          : 'IN_STOCK';
+
+      setStockItems((prev) =>
+        prev.map((i) =>
+          i.id === targetItem.id
+            ? {
+                ...i,
+                currentStock: newStock,
+                status: newStatus,
+                lastMovementDate: dateStr,
+              }
+            : i
+        )
+      );
+    }
+
+    setBannerMessage({
+      type: 'success',
+      text: `${prodName} için ${movementData.quantity} adet ${movementData.type} hareketi işlendi.`,
+    });
+    appendAuditLog(
+      'STOK_HAREKETI',
+      `Stok hareketi işlendi: ${prodName} (${movementData.sku}) ${isOut ? '-' : '+'}${movementData.quantity} adet. Ref: ${docNo}`,
+      movementData.sku,
+      'SUCCESS'
+    );
+  };
+
+  const handleAddWarehouse = (whData: Omit<Warehouse, 'id'>) => {
+    const newWh: Warehouse = {
+      ...whData,
+      id: `wh-${Date.now().toString().slice(-4)}`,
+    };
+    setWarehouses((prev) => [...prev, newWh]);
+    setBannerMessage({
+      type: 'success',
+      text: `"${newWh.name}" deposu başarıyla oluşturuldu.`,
+    });
+    appendAuditLog(
+      'STOK_HAREKETI',
+      `Yeni depo oluşturuldu: ${newWh.name} (${newWh.code}) - ${newWh.city}`,
+      newWh.code,
+      'SUCCESS'
+    );
+  };
+
+  const handleSyncMarketplaceStocks = async (channel?: string) => {
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    setBannerMessage({
+      type: 'success',
+      text: channel
+        ? `${channel} stok miktarları ve fiyat listesi API ile güncellendi.`
+        : 'Tüm pazaryerleri (Trendyol, Hepsiburada, Amazon TR) stok ve fiyatları senkronize edildi.',
+    });
+    appendAuditLog(
+      'PAZARYERI_API',
+      `Pazaryeri stok senkronizasyonu tamamlandı: ${channel || 'Tüm Kanallar'} (${stockItems.length} ürün güncellendi, 0 hata).`,
+      channel || 'TÜM_PAZARYERLERI',
+      'SUCCESS'
+    );
+  };
+
   return (
     <div className="min-h-screen flex bg-[#F3F6FA] text-slate-900">
       {/* Left Full-Height Dark Navy Sidebar */}
@@ -1195,6 +1541,8 @@ export default function App() {
         outgoingEFaturaCount={outgoingEFaturaCount}
         outgoingEArsivCount={outgoingEArsivCount}
         incomingEFaturaCount={incomingInvoices.length}
+        stockItemsCount={stockItems.length}
+        criticalStockCount={criticalStockCount}
         appOwnerProfile={appOwnerProfile}
         isCollapsed={isSidebarCollapsed}
         onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
@@ -1306,6 +1654,23 @@ export default function App() {
                 onPreviewInvoice={(order) => setPreviewOrder(order)}
                 onCreateManualOrder={handleCreateManualOrder}
                 onBatchInvoiceAction={handleRunRulesNow}
+                onSaveAllModules={handleSaveAllModules}
+                hasUnsavedChanges={hasUnsavedChanges}
+              />
+            )}
+
+            {activeTab === 'stock' && (
+              <StockModuleView
+                stockItems={stockItems}
+                stockMovements={stockMovements}
+                warehouses={warehouses}
+                onAddStockItem={handleAddStockItem}
+                onUpdateStockItem={handleUpdateStockItem}
+                onDeleteStockItem={handleDeleteStockItem}
+                onAddStockMovement={handleAddStockMovement}
+                onAddWarehouse={handleAddWarehouse}
+                onSyncMarketplaceStocks={handleSyncMarketplaceStocks}
+                currentUser={users.find((u) => u.id === selectedUserId)}
                 onSaveAllModules={handleSaveAllModules}
                 hasUnsavedChanges={hasUnsavedChanges}
               />

@@ -18,6 +18,7 @@ export type ActiveTab =
   | 'company'
   | 'edoc_settings'
   | 'orders'
+  | 'stock'
   | 'reconciliation'
   | 'accountant'
   | 'marketplaces'
@@ -38,6 +39,7 @@ interface TopBarProps {
 
 const TAB_ORDER: ActiveTab[] = [
   'orders',
+  'stock',
   'edocument',
   'reconciliation',
   'accountant',
@@ -53,6 +55,11 @@ const TAB_META: Record<
     breadcrumb: 'Sipariş & Fatura Kuyruğu',
     title: 'Sipariş & Faturalandırma',
     subtitle: 'Muavin Ön Muhasebe & Pazaryeri Otomatik e-Belge Takip Programı',
+  },
+  stock: {
+    breadcrumb: 'Stok & Depo Yönetimi',
+    title: 'Stok Modülü & Envanter Takibi',
+    subtitle: 'Muavin Ön Muhasebe & Barkod, Depo Bazlı Stok ve Pazaryeri Senkronizasyonu',
   },
   edocument: {
     breadcrumb: 'GİB e-Belge Merkezi',
