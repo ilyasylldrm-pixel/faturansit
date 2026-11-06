@@ -34,6 +34,9 @@ import {
   formatTryCurrency,
 } from '../utils/invoicingEngine';
 import {
+  acceptMysoftInvoice,
+  denyMysoftInvoice,
+  downloadMysoftFile,
   downloadMysoftPdf,
   listMysoftDocuments,
   MysoftClientError,
@@ -390,6 +393,48 @@ export const EDocumentModuleView: React.FC<EDocumentModuleViewProps> = ({
     setTimeout(() => setSettingsSavedNotice(false), 3000);
   };
 
+  const respondIncoming = async (
+    invoice: IncomingEInvoice,
+    decision: 'ACCEPTED' | 'REJECTED',
+    reason?: string
+  ) => {
+    if (mysoftActive) {
+      if (!invoice.ettn) {
+        setMysoftListError('Bu belgenin ETTN değeri yok.');
+        return;
+      }
+      try {
+        if (decision === 'ACCEPTED') {
+          await acceptMysoftInvoice({ ettn: invoice.ettn, tenantIdentifierNumber });
+        } else {
+          await denyMysoftInvoice({
+            ettn: invoice.ettn,
+            rejectReason: reason,
+            tenantIdentifierNumber,
+          });
+        }
+        setMysoftInbox((prev) =>
+          (prev ?? []).map((row) =>
+            row.id === invoice.id
+              ? {
+                  ...row,
+                  responseStatus: decision,
+                  rejectionReason: decision === 'REJECTED' ? reason : undefined,
+                }
+              : row
+          )
+        );
+        setMysoftListError(null);
+      } catch (error) {
+        setMysoftListError(
+          error instanceof MysoftClientError ? error.message : 'Mysoft yanıtı gönderilemedi.'
+        );
+        return;
+      }
+    }
+    onRespondIncomingInvoice(invoice.id, decision, reason);
+  };
+
   const handleConfirmCancelEArchive = (e: React.FormEvent) => {
     e.preventDefault();
     if (!cancelOrderTarget) return;
@@ -420,8 +465,8 @@ export const EDocumentModuleView: React.FC<EDocumentModuleViewProps> = ({
   const handleConfirmRejectIncoming = (e: React.FormEvent) => {
     e.preventDefault();
     if (!rejectIncomingTarget) return;
-    onRespondIncomingInvoice(
-      rejectIncomingTarget.id,
+    void respondIncoming(
+      rejectIncomingTarget,
       'REJECTED',
       rejectReasonInput.trim() || 'Ticari e-Fatura reddedildi.'
     );
@@ -575,6 +620,46 @@ export const EDocumentModuleView: React.FC<EDocumentModuleViewProps> = ({
                             }}
                           >
                             PDF
+                          </button>
+                        )}
+                        {row.ettn && (
+                          <button
+                            type="button"
+                            className="ml-2 text-blue-700 font-semibold cursor-pointer"
+                            onClick={() => {
+                              void downloadMysoftFile({
+                                direction: 'outgoing',
+                                ettn: row.ettn,
+                                format: 'xml',
+                                tenantIdentifierNumber,
+                              }).catch((error: unknown) => {
+                                setMysoftListError(
+                                  error instanceof Error ? error.message : 'XML alınamadı.'
+                                );
+                              });
+                            }}
+                          >
+                            XML
+                          </button>
+                        )}
+                        {row.ettn && (
+                          <button
+                            type="button"
+                            className="ml-2 text-blue-700 font-semibold cursor-pointer"
+                            onClick={() => {
+                              void downloadMysoftFile({
+                                direction: 'outgoing',
+                                ettn: row.ettn,
+                                format: 'html',
+                                tenantIdentifierNumber,
+                              }).catch((error: unknown) => {
+                                setMysoftListError(
+                                  error instanceof Error ? error.message : 'HTML alınamadı.'
+                                );
+                              });
+                            }}
+                          >
+                            HTML
                           </button>
                         )}
                       </td>
@@ -1808,12 +1893,9 @@ export const EDocumentModuleView: React.FC<EDocumentModuleViewProps> = ({
                               <>
                                 <button
                                   type="button"
-                                  onClick={() =>
-                                    onRespondIncomingInvoice(
-                                      inv.id,
-                                      'ACCEPTED'
-                                    )
-                                  }
+                                  onClick={() => {
+                                    void respondIncoming(inv, 'ACCEPTED');
+                                  }}
                                   className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors cursor-pointer"
                                 >
                                   <Check className="w-3.5 h-3.5" />
@@ -1826,6 +1908,46 @@ export const EDocumentModuleView: React.FC<EDocumentModuleViewProps> = ({
                                 >
                                   <XCircle className="w-3.5 h-3.5" />
                                   Reddet
+                                </button>
+                              </>
+                            )}
+                            {mysoftActive && inv.ettn && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    void downloadMysoftFile({
+                                      direction: 'incoming',
+                                      ettn: inv.ettn,
+                                      format: 'pdf',
+                                      tenantIdentifierNumber,
+                                    }).catch((error: unknown) => {
+                                      setMysoftListError(
+                                        error instanceof Error ? error.message : 'PDF alınamadı.'
+                                      );
+                                    });
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer"
+                                >
+                                  PDF
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    void downloadMysoftFile({
+                                      direction: 'incoming',
+                                      ettn: inv.ettn,
+                                      format: 'xml',
+                                      tenantIdentifierNumber,
+                                    }).catch((error: unknown) => {
+                                      setMysoftListError(
+                                        error instanceof Error ? error.message : 'XML alınamadı.'
+                                      );
+                                    });
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer"
+                                >
+                                  XML
                                 </button>
                               </>
                             )}

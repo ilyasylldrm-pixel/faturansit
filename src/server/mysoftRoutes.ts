@@ -1,8 +1,15 @@
 import { Router, type Request, type Response } from 'express';
 import type { MarketplaceOrder } from '../types/invoicing.ts';
 import { determineDocumentType } from '../utils/invoicingEngine.ts';
-import { MysoftClient, MysoftError, digitsOnly, readMysoftConfig } from './mysoft.ts';
+import { MysoftClient, MysoftError, digitsOnly, normalizeDocumentRows, readMysoftConfig } from './mysoft.ts';
 import { buildMysoftInvoicePayload, type MysoftSellerInput } from './mysoftInvoice.ts';
+import { MYSOFT_OPERATIONS } from './mysoftOperations.ts';
+
+function istanbulDate(): string {
+  return new Date()
+    .toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul', hour12: false })
+    .slice(0, 10);
+}
 
 function recentRange(): { startDate: string; endDate: string } {
   const end = new Date();
@@ -163,20 +170,296 @@ export function createMysoftRouter(client = new MysoftClient(readMysoftConfig())
     }
   });
 
-  router.get('/:direction/:ettn/pdf', async (req, res) => {
+  router.post('/incoming/new', async (req, res) => {
+    try {
+      const tenant = tenantFrom(req, client.publicStatus.tenantIdentifierNumber);
+      const result = await client.call('POST', '/api/InvoiceInbox/getNewInvoiceInboxWithHeaderInfoList', {
+        json: { ...(req.body as object), tenantIdentifierNumber: tenant },
+      });
+      res.json({ documents: normalizeDocumentRows(result) });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.post('/incoming/paging', async (req, res) => {
+    try {
+      const body = (req.body ?? {}) as { pageSize?: number; pageNumber?: number };
+      const pageSize = Math.min(Math.max(Number(body.pageSize) || 100, 1), 1000);
+      const pageNumber = Math.max(Number(body.pageNumber) || 1, 1);
+      const tenant = tenantFrom(req, client.publicStatus.tenantIdentifierNumber);
+      const result = await client.call(
+        'POST',
+        '/api/InvoiceInbox/getInvoiceInboxWithHeaderInfoListForPeriodPaging',
+        { json: { ...body, pageSize, pageNumber, tenantIdentifierNumber: tenant } }
+      );
+      res.json({ documents: normalizeDocumentRows(result), pageSize, pageNumber, raw: result });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.get('/tenants/:identifierNumber', async (req, res) => {
+    try {
+      const result = await client.call('GET', '/api/Tenant/getTenantWithIdentifier', {
+        query: { identifierNumber: digitsOnly(req.params.identifierNumber) },
+      });
+      res.json(result ?? { ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.get('/tenants/:identifierNumber/info', async (req, res) => {
+    try {
+      const result = await client.call('GET', '/api/Tenant/getTenantInfo', {
+        query: { identifierNumber: digitsOnly(req.params.identifierNumber) },
+      });
+      res.json(result ?? { ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.get('/taxpayer/:identifierNumber', async (req, res) => {
+    try {
+      const identifier = digitsOnly(req.params.identifierNumber);
+      const result = await client.call('GET', '/api/Taxpayer/getTaxPayerDetailInfo', {
+        query: {
+          identifierNumber: identifier,
+          tenantIdentifierNumber: tenantFrom(req, client.publicStatus.tenantIdentifierNumber),
+        },
+      });
+      res.json(result ?? { ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.get('/gib-account/:vknTckn', async (req, res) => {
+    try {
+      const result = await client.call('GET', '/api/GeneralCard/getGibAccountModel', {
+        query: {
+          vknTckn: digitsOnly(req.params.vknTckn),
+          tenantIdentifierNumber: tenantFrom(req, client.publicStatus.tenantIdentifierNumber),
+        },
+      });
+      res.json(result ?? { ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.post('/outgoing/ubl', async (req, res) => {
+    try {
+      const result = await client.call('POST', '/api/InvoiceOutbox/invoiceOutboxWithUblXml', {
+        json: req.body,
+      });
+      res.json(result);
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.post('/outgoing/:ettn/cancel', async (req, res) => {
+    try {
+      const body = (req.body ?? {}) as { cancelDate?: string; cancelType?: string; cancelNote?: string };
+      const result = await client.call('GET', '/api/InvoiceOutbox/cancelEArchiveInvoice', {
+        query: {
+          invoiceETTN: req.params.ettn,
+          cancelDate: body.cancelDate || istanbulDate(),
+          cancelType: body.cancelType || 'PORTAL',
+          cancelNote: body.cancelNote || 'İptal edildi',
+          tenantIdentifierNumber: tenantFrom(req, client.publicStatus.tenantIdentifierNumber),
+        },
+      });
+      res.json(result ?? { ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.post('/incoming/:ettn/accept', async (req, res) => {
+    try {
+      const result = await client.call('GET', '/api/InvoiceInbox/acceptInvoice', {
+        query: {
+          invoiceETTN: req.params.ettn,
+          tenantIdentifierNumber: tenantFrom(req, client.publicStatus.tenantIdentifierNumber),
+        },
+      });
+      res.json(result ?? { ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.post('/incoming/:ettn/deny', async (req, res) => {
+    try {
+      const body = (req.body ?? {}) as { rejectReason?: string };
+      const result = await client.call('GET', '/api/InvoiceInbox/denyInvoice', {
+        query: {
+          invoiceETTN: req.params.ettn,
+          rejectReason: body.rejectReason || 'Reddedildi',
+          tenantIdentifierNumber: tenantFrom(req, client.publicStatus.tenantIdentifierNumber),
+        },
+      });
+      res.json(result ?? { ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.post('/incoming/:ettn/acknowledge', async (req, res) => {
+    try {
+      const result = await client.call('GET', '/api/InvoiceInbox/invoiceInboxSavedByCustomer', {
+        query: {
+          invoiceETTN: req.params.ettn,
+          tenantIdentifierNumber: tenantFrom(req, client.publicStatus.tenantIdentifierNumber),
+        },
+      });
+      res.json(result ?? { ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.get('/operations', (_req, res) => {
+    res.json({ operations: Object.keys(MYSOFT_OPERATIONS).sort() });
+  });
+
+  router.all('/operations/:key', async (req, res) => {
+    const operation = MYSOFT_OPERATIONS[req.params.key];
+    if (!operation) {
+      res.status(404).json({ error: 'Bu Mysoft işlemi yok.', code: 'UNKNOWN_OPERATION' });
+      return;
+    }
+    if (req.method !== operation.method) {
+      res.status(405).json({ error: 'Yöntem uyuşmuyor.', code: 'INVALID_REQUEST' });
+      return;
+    }
+    const query: Record<string, string | undefined> = {};
+    for (const [key, value] of Object.entries(req.query)) {
+      if (typeof value === 'string') query[key] = value;
+    }
+    const tenant = tenantFrom(req, client.publicStatus.tenantIdentifierNumber);
+    if (tenant && !query.tenantIdentifierNumber) query.tenantIdentifierNumber = tenant;
+    try {
+      if (operation.binary) {
+        const bytes = await client.download(operation.method, operation.path, {
+          query,
+          json: operation.method === 'POST' ? req.body : undefined,
+        });
+        const name = req.params.key.toLowerCase();
+        const contentType = bytes.subarray(0, 2).toString('utf8') === 'PK'
+          ? 'application/zip'
+          : bytes.subarray(0, 4).toString('utf8') === '%PDF'
+            ? 'application/pdf'
+            : name.includes('html')
+              ? 'text/html; charset=utf-8'
+              : name.includes('xml')
+                ? 'application/xml'
+                : 'application/octet-stream';
+        res.setHeader('Content-Type', contentType);
+        res.send(bytes);
+        return;
+      }
+      let body: unknown;
+      if (operation.method === 'POST') {
+        if (req.body && typeof req.body === 'object' && !Array.isArray(req.body)) {
+          const record = { ...(req.body as Record<string, unknown>) };
+          if (tenant && record.tenantIdentifierNumber == null) record.tenantIdentifierNumber = tenant;
+          body = record;
+        } else {
+          body = req.body;
+        }
+      }
+      const result = await client.call(operation.method, operation.path, { query, json: body });
+      res.json(result ?? { ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  const invoiceFilePath = (direction: 'outgoing' | 'incoming', format: string) => {
+    if (direction === 'outgoing' && format === 'pdf') return '/api/InvoiceOutbox/getInvoiceOutboxPdfAsZip';
+    if (direction === 'outgoing' && format === 'xml') return '/api/InvoiceOutbox/getInvoiceOutboxXMLAsZip';
+    if (direction === 'outgoing' && format === 'html') return '/api/InvoiceOutbox/getInvoiceOutboxHTMLAsZip';
+    if (direction === 'incoming' && format === 'pdf') return '/api/InvoiceInbox/getInvoiceInboxPdfAsZip';
+    if (direction === 'incoming' && format === 'xml') return '/api/InvoiceInbox/getInvoiceInboxUBLXMLAsZip';
+    if (direction === 'incoming' && format === 'html') return '/api/InvoiceInbox/getInvoiceInboxHTMLAsZip';
+    return '';
+  };
+
+  router.get('/:direction/:ettn/status', async (req, res) => {
     const direction = req.params.direction === 'incoming' ? 'incoming' : req.params.direction === 'outgoing' ? 'outgoing' : '';
-    if (!direction) {
+    const path = direction === 'outgoing'
+      ? '/api/InvoiceOutbox/getInvoiceOutboxStatus'
+      : direction === 'incoming'
+        ? '/api/InvoiceInbox/getInvoiceInboxStatus'
+        : '';
+    if (!path) {
       res.status(404).json({ error: 'Belge yönü geçersiz.', code: 'INVALID_REQUEST' });
       return;
     }
     try {
-      const bytes = await client.pdf(
-        direction,
-        req.params.ettn,
-        tenantFrom(req, client.publicStatus.tenantIdentifierNumber)
-      );
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="${req.params.ettn}.pdf"`);
+      const result = await client.call('GET', path, {
+        query: {
+          invoiceETTN: req.params.ettn,
+          tenantIdentifierNumber: tenantFrom(req, client.publicStatus.tenantIdentifierNumber),
+        },
+      });
+      res.json(result ?? { ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.get('/:direction/:ettn/model', async (req, res) => {
+    const direction = req.params.direction === 'incoming' ? 'incoming' : req.params.direction === 'outgoing' ? 'outgoing' : '';
+    const path = direction === 'outgoing'
+      ? '/api/InvoiceOutbox/getInvoiceOutboxModel'
+      : direction === 'incoming'
+        ? '/api/InvoiceInbox/getInvoiceInboxModel'
+        : '';
+    if (!path) {
+      res.status(404).json({ error: 'Belge yönü geçersiz.', code: 'INVALID_REQUEST' });
+      return;
+    }
+    try {
+      const result = await client.call('GET', path, {
+        query: {
+          invoiceETTN: req.params.ettn,
+          tenantIdentifierNumber: tenantFrom(req, client.publicStatus.tenantIdentifierNumber),
+        },
+      });
+      res.json(result ?? { ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.get('/:direction/:ettn/:format(pdf|xml|html)', async (req, res) => {
+    const direction = req.params.direction === 'incoming' ? 'incoming' : req.params.direction === 'outgoing' ? 'outgoing' : '';
+    const format = req.params.format;
+    const path = direction ? invoiceFilePath(direction, format) : '';
+    if (!path) {
+      res.status(404).json({ error: 'Belge yönü geçersiz.', code: 'INVALID_REQUEST' });
+      return;
+    }
+    try {
+      const bytes = await client.download('GET', path, {
+        query: {
+          invoiceETTN: req.params.ettn,
+          tenantIdentifierNumber: tenantFrom(req, client.publicStatus.tenantIdentifierNumber),
+        },
+      });
+      const contentType = format === 'pdf'
+        ? 'application/pdf'
+        : format === 'html'
+          ? 'text/html; charset=utf-8'
+          : 'application/xml';
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Disposition', `attachment; filename="${req.params.ettn}.${format}"`);
       res.send(bytes);
     } catch (error) {
       fail(res, error);

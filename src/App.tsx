@@ -49,7 +49,7 @@ import {
   validateAndCreatePlatformUser,
   validateTurkishTaxIdentifier,
 } from './utils/invoicingEngine';
-import { issueMysoftInvoice } from './services/mysoftClient';
+import { cancelMysoftArchive, issueMysoftInvoice, MysoftClientError } from './services/mysoftClient';
 import { ActiveTab, TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
 import { OrdersQueueView } from './components/OrdersQueueView';
@@ -545,28 +545,57 @@ export default function App() {
   const handleCancelEArchiveInvoice = (orderId: string, reason: string) => {
     const target = orders.find((o) => o.id === orderId);
     if (!target) return;
-    setOrders((prev) =>
-      prev.map((o) =>
-        o.id === orderId
-          ? {
-              ...o,
-              isCancelled: true,
-              cancelledAt: '2026-11-05 10:20',
-              cancelReason: reason,
-            }
-          : o
-      )
-    );
-    setBannerMessage({
-      type: 'warning',
-      text: `${target.gibInvoiceNumber || target.marketplaceOrderNumber} numaralı Giden e-Arşiv faturası iptal edildi (${reason}).`,
-    });
-    appendAuditLog(
-      'FATURA_KESIMI',
-      `${target.gibInvoiceNumber || target.marketplaceOrderNumber} numaralı e-Arşiv faturası iptal edildi: ${reason}`,
-      target.gibInvoiceNumber || target.marketplaceOrderNumber,
-      'WARNING'
-    );
+    const markCancelled = () => {
+      const cancelledAt = new Date()
+        .toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul', hour12: false })
+        .slice(0, 16);
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.id === orderId
+            ? {
+                ...o,
+                isCancelled: true,
+                cancelledAt,
+                cancelReason: reason,
+              }
+            : o
+        )
+      );
+      setBannerMessage({
+        type: 'warning',
+        text: `${target.gibInvoiceNumber || target.marketplaceOrderNumber} numaralı Giden e-Arşiv faturası iptal edildi (${reason}).`,
+      });
+      appendAuditLog(
+        'FATURA_KESIMI',
+        `${target.gibInvoiceNumber || target.marketplaceOrderNumber} numaralı e-Arşiv faturası iptal edildi: ${reason}`,
+        target.gibInvoiceNumber || target.marketplaceOrderNumber,
+        'WARNING'
+      );
+    };
+    if (systemSettings.primaryGibIntegrator !== 'MYSOFT') {
+      markCancelled();
+      return;
+    }
+    if (!target.ettn) {
+      setBannerMessage({
+        type: 'warning',
+        text: `#${target.marketplaceOrderNumber} faturasında Mysoft ETTN yok, iptal gönderilmedi.`,
+      });
+      return;
+    }
+    void cancelMysoftArchive({
+      ettn: target.ettn,
+      cancelNote: reason,
+      tenantIdentifierNumber: sellerForOrder(target).taxIdentifier,
+    })
+      .then(markCancelled)
+      .catch((error: unknown) => {
+        const message = error instanceof MysoftClientError ? error.message : 'Mysoft iptali başarısız.';
+        setBannerMessage({
+          type: 'warning',
+          text: `${target.gibInvoiceNumber || target.marketplaceOrderNumber} iptal edilemedi: ${message}`,
+        });
+      });
   };
 
   const handleRespondIncomingInvoice = (

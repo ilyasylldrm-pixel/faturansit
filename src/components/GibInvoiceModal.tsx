@@ -9,7 +9,7 @@ import {
   generateUblTrXmlPreview,
   roundCurrency,
 } from '../utils/invoicingEngine';
-import { downloadMysoftPdf } from '../services/mysoftClient';
+import { downloadMysoftFile, downloadMysoftPdf } from '../services/mysoftClient';
 
 interface GibInvoiceModalProps {
   order: MarketplaceOrder | null;
@@ -160,14 +160,34 @@ export const GibInvoiceModal: React.FC<GibInvoiceModalProps> = ({
             </button>
 
             {order.ettn && (
-              <button
-                type="button"
-                onClick={handleMysoftPdf}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-              >
-                <Download className="w-3.5 h-3.5 text-[#248BD6]" />
-                Mysoft PDF
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={handleMysoftPdf}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5 text-[#248BD6]" />
+                  Mysoft PDF
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPdfError(null);
+                    void downloadMysoftFile({
+                      direction: 'outgoing',
+                      ettn: order.ettn!,
+                      format: 'xml',
+                      tenantIdentifierNumber,
+                    }).catch((error: unknown) => {
+                      setPdfError(error instanceof Error ? error.message : 'XML alınamadı.');
+                    });
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <FileCode className="w-3.5 h-3.5 text-[#248BD6]" />
+                  Mysoft XML
+                </button>
+              </>
             )}
 
             <button

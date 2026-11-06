@@ -309,19 +309,63 @@ export class MysoftClient {
     return payload;
   }
 
-  private async requestBytes(path: string, query: Record<string, string | undefined>): Promise<Buffer> {
+  async call(
+    method: 'GET' | 'POST',
+    path: string,
+    input: { query?: Record<string, string | undefined>; json?: unknown } = {}
+  ): Promise<unknown> {
+    if (!path.startsWith('/api/')) {
+      throw new MysoftError('Geçersiz Mysoft yolu.', 400, 'INVALID_REQUEST');
+    }
+    return this.request(path, { method, query: input.query, json: input.json });
+  }
+
+  async download(
+    method: 'GET' | 'POST',
+    path: string,
+    input: { query?: Record<string, string | undefined>; json?: unknown } = {}
+  ): Promise<Buffer> {
+    if (!path.startsWith('/api/')) {
+      throw new MysoftError('Geçersiz Mysoft yolu.', 400, 'INVALID_REQUEST');
+    }
+    return this.requestBytes(path, input.query ?? {}, method, input.json);
+  }
+
+  private async requestBytes(
+    path: string,
+    query: Record<string, string | undefined>,
+    method: 'GET' | 'POST' = 'GET',
+    json?: unknown,
+    allowRetry = true
+  ): Promise<Buffer> {
     const token = await this.accessToken();
     const url = new URL(`${this.config.baseUrl}${path}`);
     for (const [key, value] of Object.entries(query)) {
       if (value) url.searchParams.set(key, value);
     }
+    const headers: Record<string, string> = {
+      Accept: '*/*',
+      Authorization: `Bearer ${token}`,
+    };
+    let body: string | undefined;
+    if (json !== undefined) {
+      headers['Content-Type'] = 'application/json';
+      body = JSON.stringify(json);
+    }
     const response = await fetch(url, {
-      headers: { Accept: '*/*', Authorization: `Bearer ${token}` },
+      method,
+      headers,
+      body,
       signal: AbortSignal.timeout(this.config.timeoutMs),
     });
+    if (response.status === 401 && allowRetry) {
+      tokenCache = null;
+      await this.accessToken(true);
+      return this.requestBytes(path, query, method, json, false);
+    }
     if (!response.ok) {
       const payload = await readBody(response);
-      const parsed = failureMessage(payload, 'PDF alınamadı.');
+      const parsed = failureMessage(payload, 'Belge alınamadı.');
       throw new MysoftError(parsed.message, response.status, parsed.code);
     }
     const contentType = response.headers.get('content-type') ?? '';
@@ -330,11 +374,11 @@ export class MysoftClient {
       const payload = JSON.parse(raw.toString('utf8')) as unknown;
       const record = asRecord(payload);
       if (record?.succeed === false || record?.success === false) {
-        const parsed = failureMessage(payload, 'PDF alınamadı.');
+        const parsed = failureMessage(payload, 'Belge alınamadı.');
         throw new MysoftError(parsed.message, 422, parsed.code);
       }
       const encoded = pickString(record, ['data', 'Data']);
-      if (!encoded) throw new MysoftError('PDF verisi boş.', 422, 'MYSOFT_PDF');
+      if (!encoded) throw new MysoftError('Belge verisi boş.', 422, 'MYSOFT_FILE');
       const decoded = Buffer.from(encoded, 'base64');
       if (decoded.subarray(0, 2).toString('utf8') === 'PK') {
         return firstZipFile(decoded) ?? decoded;

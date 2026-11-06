@@ -145,28 +145,86 @@ export async function checkMysoftRecipient(
   return readJson<MysoftRecipient>(response);
 }
 
-export async function downloadMysoftPdf(input: {
+async function postMysoft(path: string, tenantIdentifierNumber?: string, json?: unknown): Promise<void> {
+  const response = await fetch(path, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(tenantIdentifierNumber ? { 'x-tenant-identifier': tenantIdentifierNumber } : {}),
+    },
+    body: JSON.stringify({
+      ...(json && typeof json === 'object' ? json : {}),
+      tenantIdentifierNumber,
+    }),
+  });
+  await readJson(response);
+}
+
+export async function cancelMysoftArchive(input: {
+  ettn: string;
+  cancelNote?: string;
+  tenantIdentifierNumber?: string;
+}): Promise<void> {
+  await postMysoft(
+    `/api/mysoft/outgoing/${encodeURIComponent(input.ettn)}/cancel`,
+    input.tenantIdentifierNumber,
+    { cancelNote: input.cancelNote }
+  );
+}
+
+export async function acceptMysoftInvoice(input: {
+  ettn: string;
+  tenantIdentifierNumber?: string;
+}): Promise<void> {
+  await postMysoft(
+    `/api/mysoft/incoming/${encodeURIComponent(input.ettn)}/accept`,
+    input.tenantIdentifierNumber
+  );
+}
+
+export async function denyMysoftInvoice(input: {
+  ettn: string;
+  rejectReason?: string;
+  tenantIdentifierNumber?: string;
+}): Promise<void> {
+  await postMysoft(
+    `/api/mysoft/incoming/${encodeURIComponent(input.ettn)}/deny`,
+    input.tenantIdentifierNumber,
+    { rejectReason: input.rejectReason }
+  );
+}
+
+export async function downloadMysoftFile(input: {
   direction: 'outgoing' | 'incoming';
   ettn: string;
+  format: 'pdf' | 'xml' | 'html';
   tenantIdentifierNumber?: string;
 }): Promise<void> {
   const query = input.tenantIdentifierNumber
     ? `?tenantIdentifierNumber=${encodeURIComponent(input.tenantIdentifierNumber)}`
     : '';
   const response = await fetch(
-    `/api/mysoft/${input.direction}/${encodeURIComponent(input.ettn)}/pdf${query}`
+    `/api/mysoft/${input.direction}/${encodeURIComponent(input.ettn)}/${input.format}${query}`
   );
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as { error?: string; code?: string };
-    throw new MysoftClientError(body.error || 'PDF alınamadı.', body.code);
+    throw new MysoftClientError(body.error || 'Belge alınamadı.', body.code);
   }
   const blob = await response.blob();
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `${input.ettn}.pdf`;
+  link.download = `${input.ettn}.${input.format === 'xml' ? 'xml' : input.format}`;
   document.body.appendChild(link);
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+export async function downloadMysoftPdf(input: {
+  direction: 'outgoing' | 'incoming';
+  ettn: string;
+  tenantIdentifierNumber?: string;
+}): Promise<void> {
+  await downloadMysoftFile({ ...input, format: 'pdf' });
 }
