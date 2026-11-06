@@ -1528,6 +1528,21 @@ export default function App() {
     );
   };
 
+  const handleClearStockList = () => {
+    setStockItems([]);
+    setStockMovements([]);
+    setBannerMessage({
+      type: 'warning',
+      text: 'Stok listesi ve envanter hareketleri tamamen boşaltıldı.',
+    });
+    appendAuditLog(
+      'STOK_HAREKETI',
+      'Stok listesi ve tüm envanter kartları boşaltıldı.',
+      'STOK_SIFIRLA',
+      'WARNING'
+    );
+  };
+
   return (
     <div className="min-h-screen flex bg-[#F3F6FA] text-slate-900">
       {/* Left Full-Height Dark Navy Sidebar */}
@@ -1671,6 +1686,7 @@ export default function App() {
                 onAddWarehouse={handleAddWarehouse}
                 onSyncMarketplaceStocks={handleSyncMarketplaceStocks}
                 currentUser={users.find((u) => u.id === selectedUserId)}
+                onClearStockList={handleClearStockList}
                 onSaveAllModules={handleSaveAllModules}
                 hasUnsavedChanges={hasUnsavedChanges}
               />
