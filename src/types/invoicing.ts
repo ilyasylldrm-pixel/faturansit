@@ -182,6 +182,8 @@ export interface SystemPlatformSettings {
   primaryGibIntegrator: EInvoiceIntegrator;
   eInvoicePrefix: string; // GİB Özel Entegratör e-Fatura Resmi Seri Ön Eki (Örn: EFT)
   eArchivePrefix: string; // GİB Özel Entegratör e-Arşiv Fatura Resmi Seri Ön Eki (Örn: EAR)
+  eInvoiceXsltName?: string;
+  eArchiveXsltName?: string;
 }
 
 export interface OrderLineItem {

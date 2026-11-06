@@ -49,7 +49,7 @@ import {
   validateAndCreatePlatformUser,
   validateTurkishTaxIdentifier,
 } from './utils/invoicingEngine';
-import { cancelMysoftArchive, issueMysoftInvoice, MysoftClientError } from './services/mysoftClient';
+import { cancelMysoftArchive, issueMysoftInvoice, MysoftClientError, previewMysoftDraft } from './services/mysoftClient';
 import { ActiveTab, TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
 import { OrdersQueueView } from './components/OrdersQueueView';
@@ -252,6 +252,8 @@ export default function App() {
         preferredScenario: 'TICARIFATURA',
         eInvoicePrefix: systemSettings.eInvoicePrefix,
         eArchivePrefix: systemSettings.eArchivePrefix,
+        eInvoiceXsltName: systemSettings.eInvoiceXsltName,
+        eArchiveXsltName: systemSettings.eArchiveXsltName,
       });
       const invoicedAt = new Date()
         .toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul', hour12: false })
@@ -1357,6 +1359,19 @@ export default function App() {
         tenantIdentifierNumber={
           previewOrder
             ? companyProfiles[previewOrder.ownerUserId || selectedUserId]?.taxIdentifier
+            : undefined
+        }
+        onMysoftDraft={
+          previewOrder && systemSettings.primaryGibIntegrator === 'MYSOFT'
+            ? () =>
+                previewMysoftDraft({
+                  order: previewOrder,
+                  seller: sellerForOrder(previewOrder),
+                  eInvoicePrefix: systemSettings.eInvoicePrefix,
+                  eArchivePrefix: systemSettings.eArchivePrefix,
+                  eInvoiceXsltName: systemSettings.eInvoiceXsltName,
+                  eArchiveXsltName: systemSettings.eArchiveXsltName,
+                })
             : undefined
         }
         onClose={() => setPreviewOrder(null)}

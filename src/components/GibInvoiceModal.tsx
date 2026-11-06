@@ -14,12 +14,14 @@ import { downloadMysoftFile, downloadMysoftPdf } from '../services/mysoftClient'
 interface GibInvoiceModalProps {
   order: MarketplaceOrder | null;
   tenantIdentifierNumber?: string;
+  onMysoftDraft?: () => Promise<void>;
   onClose: () => void;
 }
 
 export const GibInvoiceModal: React.FC<GibInvoiceModalProps> = ({
   order,
   tenantIdentifierNumber,
+  onMysoftDraft,
   onClose,
 }) => {
   const [viewMode, setViewMode] = useState<'visual' | 'xml'>('visual');
@@ -158,6 +160,22 @@ export const GibInvoiceModal: React.FC<GibInvoiceModalProps> = ({
               <Printer className="w-3.5 h-3.5" />
               Yazdır / PDF
             </button>
+
+            {onMysoftDraft && (
+              <button
+                type="button"
+                onClick={() => {
+                  setPdfError(null);
+                  void onMysoftDraft().catch((error: unknown) => {
+                    setPdfError(error instanceof Error ? error.message : 'Taslak alınamadı.');
+                  });
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              >
+                <FileText className="w-3.5 h-3.5 text-[#248BD6]" />
+                Mysoft taslak
+              </button>
+            )}
 
             {order.ettn && (
               <>

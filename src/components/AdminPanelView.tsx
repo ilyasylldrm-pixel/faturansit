@@ -462,6 +462,7 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
           users={users}
           selectedUserId={selectedUserId}
           onSelectUser={onSelectUser}
+          tenantIdentifierNumber={companyProfiles?.[selectedUserId]?.taxIdentifier}
           onBatchRepairIndividualOrders={onBatchRepairIndividualOrders}
           onSaveAllModules={onSaveAllModules}
           hasUnsavedChanges={hasUnsavedChanges}

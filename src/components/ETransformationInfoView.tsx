@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   FileCode2,
   CheckCircle2,
@@ -16,13 +16,19 @@ import {
   PlatformUser,
   SystemPlatformSettings,
 } from '../types/invoicing';
-import { fetchMysoftStatus } from '../services/mysoftClient';
+import {
+  fetchMysoftInvoiceDesign,
+  fetchMysoftStatus,
+  MysoftClientError,
+  type MysoftInvoiceDesign,
+} from '../services/mysoftClient';
 
 interface ETransformationInfoViewProps {
   systemSettings: SystemPlatformSettings;
   onUpdateSystemSettings: (next: SystemPlatformSettings) => void;
   users: PlatformUser[];
   selectedUserId: string;
+  tenantIdentifierNumber?: string;
   onSelectUser: (userId: string) => void;
   onBatchRepairIndividualOrders?: () => { repairedAndInvoicedCount: number };
   onSaveAllModules?: (moduleName?: string) => void;
@@ -56,6 +62,7 @@ export const ETransformationInfoView: React.FC<ETransformationInfoViewProps> = (
   onUpdateSystemSettings,
   users,
   selectedUserId,
+  tenantIdentifierNumber,
   onSelectUser,
   onBatchRepairIndividualOrders,
   onSaveAllModules,
@@ -73,6 +80,44 @@ export const ETransformationInfoView: React.FC<ETransformationInfoViewProps> = (
     'IDLE' | 'TESTING' | 'SUCCESS' | 'ERROR'
   >('IDLE');
   const [connectionDetail, setConnectionDetail] = useState<string | null>(null);
+  const [designLoading, setDesignLoading] = useState(false);
+  const [designError, setDesignError] = useState<string | null>(null);
+  const [eInvoiceDesign, setEInvoiceDesign] = useState<MysoftInvoiceDesign | null>(null);
+  const [eArchiveDesign, setEArchiveDesign] = useState<MysoftInvoiceDesign | null>(null);
+  const sellerVkn = (tenantIdentifierNumber || selectedUser?.taxIdentifier || '').replace(/\D/g, '');
+
+  useEffect(() => {
+    if (formData.primaryGibIntegrator !== 'MYSOFT' || (sellerVkn.length !== 10 && sellerVkn.length !== 11)) {
+      setEInvoiceDesign(null);
+      setEArchiveDesign(null);
+      setDesignError(null);
+      return;
+    }
+    let cancelled = false;
+    setDesignLoading(true);
+    setDesignError(null);
+    void Promise.all([
+      fetchMysoftInvoiceDesign(sellerVkn, 'EFATURA'),
+      fetchMysoftInvoiceDesign(sellerVkn, 'EARSIVFATURA'),
+    ])
+      .then(([invoice, archive]) => {
+        if (cancelled) return;
+        setEInvoiceDesign(invoice);
+        setEArchiveDesign(archive);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setEInvoiceDesign(null);
+        setEArchiveDesign(null);
+        setDesignError(error instanceof MysoftClientError ? error.message : 'Portal tasarımı alınamadı.');
+      })
+      .finally(() => {
+        if (!cancelled) setDesignLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [formData.primaryGibIntegrator, sellerVkn]);
 
   const isDirty =
     JSON.stringify(formData) !== JSON.stringify(systemSettings);
@@ -334,6 +379,56 @@ export const ETransformationInfoView: React.FC<ETransformationInfoViewProps> = (
             </div>
           </div>
         </div>
+
+        {formData.primaryGibIntegrator === 'MYSOFT' && (
+          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
+            <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-200">
+              <h2 className="text-sm font-semibold text-slate-900">
+                Mysoft portal fatura tasarımı
+              </h2>
+              <span className="text-[11px] font-mono text-slate-500">{sellerVkn || 'VKN yok'}</span>
+            </div>
+            {designLoading && <p className="text-xs text-slate-500">Portal dizaynları yükleniyor.</p>}
+            {designError && (
+              <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                {designError}
+              </p>
+            )}
+            {!designLoading && !designError && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                <DesignColumn
+                  title="e-Fatura"
+                  design={eInvoiceDesign}
+                  selectedXslt={formData.eInvoiceXsltName}
+                  selectedPrefix={formData.eInvoicePrefix}
+                  onPick={(xsltName, prefix) =>
+                    setFormData({
+                      ...formData,
+                      eInvoiceXsltName: xsltName,
+                      eInvoicePrefix: prefix || formData.eInvoicePrefix,
+                    })
+                  }
+                />
+                <DesignColumn
+                  title="e-Arşiv"
+                  design={eArchiveDesign}
+                  selectedXslt={formData.eArchiveXsltName}
+                  selectedPrefix={formData.eArchivePrefix}
+                  onPick={(xsltName, prefix) =>
+                    setFormData({
+                      ...formData,
+                      eArchiveXsltName: xsltName,
+                      eArchivePrefix: prefix || formData.eArchivePrefix,
+                    })
+                  }
+                />
+              </div>
+            )}
+            <p className="text-[11px] text-slate-500">
+              Seçilen tasarım ve seri, kaydettikten sonra fatura kesiminde kullanılır. Portalda seri yoksa EFT/EAR durur.
+            </p>
+          </div>
+        )}
 
         {/* Section 2: Resmi Seri Ön Ekleri & Numara Şablonları */}
         <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
@@ -599,3 +694,59 @@ export const ETransformationInfoView: React.FC<ETransformationInfoViewProps> = (
     </div>
   );
 };
+
+function DesignColumn({
+  title,
+  design,
+  selectedXslt,
+  selectedPrefix,
+  onPick,
+}: {
+  title: string;
+  design: MysoftInvoiceDesign | null;
+  selectedXslt?: string;
+  selectedPrefix: string;
+  onPick: (xsltName: string | undefined, prefix: string | undefined) => void;
+}) {
+  const designs = design?.designs ?? [];
+  const prefixes = design?.prefixes ?? [];
+  return (
+    <div className="border border-slate-200 rounded-lg p-3 space-y-2">
+      <p className="font-semibold text-slate-800">{title}</p>
+      <p className="text-[11px] text-slate-500">
+        Portal: {design?.xsltName || 'tasarım yok'} · seri {design?.prefix || 'yok'}
+        {design?.numeratorSetCode ? ` · set ${design.numeratorSetCode}` : ''}
+      </p>
+      <select
+        value={selectedXslt || design?.xsltName || ''}
+        onChange={(event) => onPick(event.target.value || undefined, selectedPrefix)}
+        className="w-full px-2 py-1.5 bg-slate-50 border border-slate-300 rounded-lg"
+      >
+        <option value="">Tasarım seçilmedi</option>
+        {designs.map((row) => (
+          <option key={row.xsltName} value={row.xsltName}>
+            {row.xsltName}
+            {row.isDefault ? ' · varsayılan' : ''}
+          </option>
+        ))}
+      </select>
+      <div className="flex flex-wrap gap-1">
+        {prefixes.length === 0 && <span className="text-[11px] text-slate-400">Portal serisi yok</span>}
+        {prefixes.map((row) => (
+          <button
+            key={row.prefix}
+            type="button"
+            onClick={() => onPick(selectedXslt || design?.xsltName, row.prefix)}
+            className={`px-2 py-1 rounded-md border font-mono cursor-pointer ${
+              selectedPrefix === row.prefix
+                ? 'bg-blue-600 text-white border-blue-600'
+                : 'bg-white text-slate-700 border-slate-200'
+            }`}
+          >
+            {row.prefix}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}

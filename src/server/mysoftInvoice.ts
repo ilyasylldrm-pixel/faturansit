@@ -53,6 +53,8 @@ export function buildMysoftInvoicePayload(input: {
   preferredScenario?: 'TEMELFATURA' | 'TICARIFATURA';
   eInvoicePrefix?: string;
   eArchivePrefix?: string;
+  eInvoiceXsltName?: string;
+  eArchiveXsltName?: string;
   buyerPkAlias?: string;
   now?: Date;
 }): Record<string, unknown> {
@@ -133,6 +135,9 @@ export function buildMysoftInvoicePayload(input: {
   const orderDate = input.order.orderDate.slice(0, 10);
   const buyerIsPerson = buyerId.normalizedId.length === 11;
   const pkAlias = eDocumentType === 'EFATURA' ? input.buyerPkAlias?.trim() || '' : '';
+  const xsltName = (
+    eDocumentType === 'EFATURA' ? input.eInvoiceXsltName : input.eArchiveXsltName
+  )?.trim();
   const notes = input.order.orderNote?.trim()
     ? [{ note: input.order.orderNote.trim() }]
     : [];
@@ -144,6 +149,9 @@ export function buildMysoftInvoicePayload(input: {
     profile: scenario,
     invoiceType: 'SATIS',
     ettn: '',
+    ...(xsltName
+      ? { xsltName, isSendWithGeneralXsltIfDefaultNotExists: true }
+      : {}),
     prefix: prefixOf(
       eDocumentType === 'EFATURA' ? input.eInvoicePrefix : input.eArchivePrefix,
       eDocumentType === 'EFATURA' ? 'EFT' : 'EAR'

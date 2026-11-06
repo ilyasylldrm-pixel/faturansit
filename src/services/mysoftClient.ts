@@ -92,12 +92,34 @@ export async function fetchMysoftStatus(): Promise<MysoftStatus> {
   return body;
 }
 
+export interface MysoftInvoiceDesign {
+  vknTckn: string;
+  eDocumentType: 'EFATURA' | 'EARSIVFATURA';
+  xsltName?: string;
+  prefix?: string;
+  numeratorSetCode?: string;
+  designs: Array<{ xsltName: string; isDefault: boolean; isApproved: boolean }>;
+  prefixes: Array<{ prefix: string; isDefault: boolean; isPassive: boolean }>;
+}
+
+export async function fetchMysoftInvoiceDesign(
+  vknTckn: string,
+  eDocumentType: 'EFATURA' | 'EARSIVFATURA'
+): Promise<MysoftInvoiceDesign> {
+  const response = await fetch(
+    `/api/mysoft/tenants/${encodeURIComponent(vknTckn)}/invoice-design?eDocumentType=${eDocumentType}`
+  );
+  return readJson<MysoftInvoiceDesign>(response);
+}
+
 export async function issueMysoftInvoice(input: {
   order: MarketplaceOrder;
   seller: MysoftSellerInput;
   preferredScenario?: 'TEMELFATURA' | 'TICARIFATURA';
   eInvoicePrefix?: string;
   eArchivePrefix?: string;
+  eInvoiceXsltName?: string;
+  eArchiveXsltName?: string;
 }): Promise<MysoftIssueResult> {
   const response = await fetch('/api/mysoft/outgoing', {
     method: 'POST',
@@ -158,6 +180,42 @@ async function postMysoft(path: string, tenantIdentifierNumber?: string, json?: 
     }),
   });
   await readJson(response);
+}
+
+export async function previewMysoftDraft(input: {
+  order: MarketplaceOrder;
+  seller: MysoftSellerInput;
+  eInvoicePrefix?: string;
+  eArchivePrefix?: string;
+  eInvoiceXsltName?: string;
+  eArchiveXsltName?: string;
+  format?: 'html' | 'pdf';
+}): Promise<void> {
+  const format = input.format ?? 'html';
+  const response = await fetch(`/api/mysoft/outgoing/draft-preview?format=${format}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(input.seller.taxIdentifier ? { 'x-tenant-identifier': input.seller.taxIdentifier } : {}),
+    },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    const body = (await response.json().catch(() => ({}))) as { error?: string; code?: string };
+    throw new MysoftClientError(body.error || 'Taslak önizleme alınamadı.', body.code);
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const opened = window.open(url, '_blank', 'noopener');
+  if (!opened) {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `mysoft-taslak.${format}`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 export async function cancelMysoftArchive(input: {

@@ -3,6 +3,7 @@ import type { MarketplaceOrder } from '../types/invoicing.ts';
 import { determineDocumentType } from '../utils/invoicingEngine.ts';
 import { MysoftClient, MysoftError, digitsOnly, normalizeDocumentRows, readMysoftConfig } from './mysoft.ts';
 import { buildMysoftInvoicePayload, type MysoftSellerInput } from './mysoftInvoice.ts';
+import { applyInvoiceDesign, resolveInvoiceDesign } from './mysoftDesign.ts';
 import { MYSOFT_OPERATIONS } from './mysoftOperations.ts';
 
 function istanbulDate(): string {
@@ -93,31 +94,47 @@ export function createMysoftRouter(client = new MysoftClient(readMysoftConfig())
     }
   });
 
+  const outgoingBody = (req: Request) =>
+    req.body as {
+      order?: MarketplaceOrder;
+      seller?: MysoftSellerInput;
+      preferredScenario?: 'TEMELFATURA' | 'TICARIFATURA';
+      eInvoicePrefix?: string;
+      eArchivePrefix?: string;
+      eInvoiceXsltName?: string;
+      eArchiveXsltName?: string;
+      tenantIdentifierNumber?: string;
+    };
+
+  const prepareOutgoing = async (req: Request) => {
+    const body = outgoingBody(req);
+    if (!body.order || !body.seller) {
+      throw new MysoftError('Sipariş ve satıcı bilgisi gerekli.', 400, 'INVALID_REQUEST');
+    }
+    const tenant = tenantFrom(req, client.publicStatus.tenantIdentifierNumber) ?? digitsOnly(body.seller.taxIdentifier);
+    const payload = buildMysoftInvoicePayload({
+      order: body.order,
+      seller: { ...body.seller, taxIdentifier: tenant || body.seller.taxIdentifier },
+      preferredScenario: body.preferredScenario,
+      eInvoicePrefix: body.eInvoicePrefix,
+      eArchivePrefix: body.eArchivePrefix,
+      eInvoiceXsltName: body.eInvoiceXsltName,
+      eArchiveXsltName: body.eArchiveXsltName,
+    });
+    try {
+      const design = await resolveInvoiceDesign(client, tenant, String(payload.eDocumentType || 'EFATURA'));
+      return { payload: applyInvoiceDesign(payload, design), tenant, order: body.order };
+    } catch {
+      return { payload, tenant, order: body.order };
+    }
+  };
+
   router.post('/outgoing', async (req, res) => {
     try {
-      const body = req.body as {
-        order?: MarketplaceOrder;
-        seller?: MysoftSellerInput;
-        preferredScenario?: 'TEMELFATURA' | 'TICARIFATURA';
-        eInvoicePrefix?: string;
-        eArchivePrefix?: string;
-        tenantIdentifierNumber?: string;
-      };
-      if (!body.order || !body.seller) {
-        res.status(400).json({ error: 'Sipariş ve satıcı bilgisi gerekli.', code: 'INVALID_REQUEST' });
-        return;
-      }
-      const tenant = tenantFrom(req, client.publicStatus.tenantIdentifierNumber) ?? digitsOnly(body.seller.taxIdentifier);
-      const payload = buildMysoftInvoicePayload({
-        order: body.order,
-        seller: { ...body.seller, taxIdentifier: tenant || body.seller.taxIdentifier },
-        preferredScenario: body.preferredScenario,
-        eInvoicePrefix: body.eInvoicePrefix,
-        eArchivePrefix: body.eArchivePrefix,
-      });
-      const { documentType } = determineDocumentType(body.order, body.preferredScenario ?? 'TICARIFATURA');
+      const { payload, tenant, order } = await prepareOutgoing(req);
+      const { documentType } = determineDocumentType(order, payload.profile === 'TEMELFATURA' ? 'TEMELFATURA' : 'TICARIFATURA');
       if (documentType === 'E_FATURA') {
-        const buyer = digitsOnly(body.order.taxIdentifier);
+        const buyer = digitsOnly(order.taxIdentifier);
         if (buyer.length === 10 || buyer.length === 11) {
           try {
             const recipient = await client.checkRecipient(buyer, tenant);
@@ -134,6 +151,24 @@ export function createMysoftRouter(client = new MysoftClient(readMysoftConfig())
         documentType,
         scenario: payload.profile,
       });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.post('/outgoing/draft-preview', async (req, res) => {
+    const format = req.query.format === 'pdf' ? 'pdf' : 'html';
+    try {
+      const { payload } = await prepareOutgoing(req);
+      payload.isSaveAsDraft = false;
+      payload.isPrintDraftWatermark = true;
+      const path = format === 'pdf'
+        ? '/api/InvoiceOutbox/getInvoiceOutboxDraftPdfAsZip'
+        : '/api/InvoiceOutbox/getInvoiceOutboxDraftHTMLAsZip';
+      const bytes = await client.download('POST', path, { json: payload });
+      res.setHeader('Content-Type', format === 'pdf' ? 'application/pdf' : 'text/html; charset=utf-8');
+      res.setHeader('Content-Disposition', `inline; filename="taslak.${format}"`);
+      res.send(bytes);
     } catch (error) {
       fail(res, error);
     }
@@ -205,6 +240,42 @@ export function createMysoftRouter(client = new MysoftClient(readMysoftConfig())
         query: { identifierNumber: digitsOnly(req.params.identifierNumber) },
       });
       res.json(result ?? { ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.get('/tenants/:identifierNumber/invoice-design', async (req, res) => {
+    const identifier = digitsOnly(req.params.identifierNumber);
+    if (identifier.length !== 10 && identifier.length !== 11) {
+      res.status(400).json({ error: 'VKN 10, TCKN 11 hane olmalı.', code: 'INVALID_REQUEST' });
+      return;
+    }
+    try {
+      const design = await resolveInvoiceDesign(
+        client,
+        identifier,
+        String(req.query.eDocumentType || 'EFATURA'),
+        req.query.isInternetSales === 'true'
+      );
+      res.json(design);
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.get('/tenants/:identifierNumber/document-numbers', async (req, res) => {
+    const identifier = digitsOnly(req.params.identifierNumber);
+    if (identifier.length !== 10 && identifier.length !== 11) {
+      res.status(400).json({ error: 'VKN 10, TCKN 11 hane olmalı.', code: 'INVALID_REQUEST' });
+      return;
+    }
+    try {
+      const [eInvoice, eArchive] = await Promise.all([
+        resolveInvoiceDesign(client, identifier, 'EFATURA'),
+        resolveInvoiceDesign(client, identifier, 'EARSIVFATURA'),
+      ]);
+      res.json({ eInvoice, eArchive });
     } catch (error) {
       fail(res, error);
     }
