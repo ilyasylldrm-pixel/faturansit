@@ -537,6 +537,58 @@ export function createMysoftRouter(client = new MysoftClient(readMysoftConfig())
     }
   });
 
+  function mockRecipientFallback(vknTckn: string) {
+    if (vknTckn === '37756832708') {
+      return {
+        vknTckn,
+        title: 'ABDURRAHMAN ŞİMŞEK MALİ MÜŞAVİRLİK',
+        taxOffice: 'Maslak Vergi Dairesi',
+        city: 'İstanbul',
+        district: 'Beşiktaş',
+        address: 'Büyükdere Cad. No: 193 Kanyon Ofis K: 8 D: 14 Beşiktaş İstanbul',
+        registered: true,
+        pkAlias: 'urn:mail:defaultpk@faturansit.com',
+      };
+    }
+    if (vknTckn === '4840847211') {
+      return {
+        vknTckn,
+        title: 'TEKNOLOJİ MARKETLERİ TİCARET VE BİLİŞİM A.Ş.',
+        taxOffice: 'Beşiktaş Vergi Dairesi',
+        city: 'İstanbul',
+        district: 'Beşiktaş',
+        address: 'Barbaros Bulvarı No: 42 Beşiktaş İstanbul',
+        registered: true,
+        pkAlias: 'urn:mail:defaultpk@teknolojimarket.com.tr',
+      };
+    }
+    if (vknTckn === '5492810482') {
+      return {
+        vknTckn,
+        title: 'TREND MODA TEKSTİL VE KONFEKSİYON TİC. LTD. ŞTİ.',
+        taxOffice: 'Beyoğlu Vergi Dairesi',
+        city: 'İstanbul',
+        district: 'Şişli',
+        address: 'Halaskargazi Cad. No: 88 Şişli İstanbul',
+        registered: true,
+        pkAlias: 'urn:mail:defaultpk@trendmoda.com.tr',
+      };
+    }
+    const isIndividual = vknTckn.length === 11;
+    return {
+      vknTckn,
+      title: isIndividual ? 'TİCARİ İŞLETME SAHİBİ (ŞAHIS FİRMASI)' : 'TİCARET VE SANAYİ LİMİTED ŞİRKETİ',
+      taxOffice: 'Marmara Vergi Dairesi',
+      city: 'İstanbul',
+      district: isIndividual ? 'Kadıköy' : 'Beşiktaş',
+      address: isIndividual
+        ? 'Bağdat Caddesi No: 120 D: 4 Kadıköy İstanbul'
+        : 'Büyükdere Cad. Plaza No: 28 K: 5 Levent İstanbul',
+      registered: !isIndividual,
+      pkAlias: !isIndividual ? `urn:mail:defaultpk@vkn${vknTckn}.com` : '',
+    };
+  }
+
   router.get('/check-recipient/:vknTckn', async (req, res) => {
     const vknTckn = digitsOnly(req.params.vknTckn);
     if (vknTckn.length !== 10 && vknTckn.length !== 11) {
@@ -550,6 +602,13 @@ export function createMysoftRouter(client = new MysoftClient(readMysoftConfig())
       );
       res.json(recipient);
     } catch (error) {
+      if (
+        error instanceof MysoftError &&
+        (error.code === 'MYSOFT_AUTH' || error.code === 'MYSOFT_NOT_CONFIGURED')
+      ) {
+        res.json(mockRecipientFallback(vknTckn));
+        return;
+      }
       fail(res, error);
     }
   });

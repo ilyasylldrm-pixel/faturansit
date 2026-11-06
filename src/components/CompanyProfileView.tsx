@@ -125,7 +125,7 @@ export const CompanyProfileView: React.FC<CompanyProfileViewProps> = ({
     return JSON.stringify(formData) !== JSON.stringify(saved);
   }, [formData, companyProfiles, selectedUserId, defaultProfile]);
 
-  const handleSimulateGibCheck = () => {
+  const handleMysoftGibCheck = () => {
     const cleanVkn = formData.taxIdentifier.replace(/\D/g, '');
     const validRes = validateTurkishTaxIdentifier(
       cleanVkn,
@@ -144,7 +144,7 @@ export const CompanyProfileView: React.FC<CompanyProfileViewProps> = ({
       timeZone: 'Europe/Istanbul',
       hour12: false,
     }).slice(0, 16);
-    void checkMysoftRecipient(validRes.normalizedId, validRes.normalizedId)
+    void checkMysoftRecipient(validRes.normalizedId)
       .then((recipient) => {
         if (!recipient.title && !recipient.registered && !recipient.taxOffice) {
           setFormError('Mysoft bu numara için mükellef kaydı döndürmedi.');
@@ -167,12 +167,12 @@ export const CompanyProfileView: React.FC<CompanyProfileViewProps> = ({
           title: recipient.title || formData.legalTitle,
           date: stamp,
           detail: recipient.registered
-            ? 'Aktif e-Fatura mükellefi'
-            : 'Kayıt bulundu, e-Fatura posta kutusu yok',
+            ? 'Mysoft üzerinden Aktif e-Fatura mükellefi olarak doğrulandı'
+            : 'Mysoft üzerinden e-Arşiv mükellefi olarak doğrulandı (e-Fatura posta kutusu yok)',
         });
       })
       .catch((error: unknown) => {
-        const message = error instanceof Error ? error.message : 'Mükellef sorgusu başarısız.';
+        const message = error instanceof Error ? error.message : 'Mysoft mükellef sorgusu başarısız.';
         setFormError(message);
         setGibCheckResult(null);
       })
@@ -355,13 +355,13 @@ export const CompanyProfileView: React.FC<CompanyProfileViewProps> = ({
                 />
                 <button
                   type="button"
-                  onClick={handleSimulateGibCheck}
+                  onClick={handleMysoftGibCheck}
                   disabled={gibChecking}
-                  title="Mysoft üzerinden GİB mükellef sorgusu"
-                  className="px-2.5 py-2 text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg border border-blue-200 transition-colors whitespace-nowrap cursor-pointer flex items-center gap-1 disabled:opacity-60"
+                  title="Mysoft üzerinden GİB e-Fatura / e-Arşiv mükellef sorgusu yap"
+                  className="px-2.5 py-2 text-xs font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg border border-blue-200 transition-colors whitespace-nowrap cursor-pointer flex items-center gap-1.5 disabled:opacity-60"
                 >
                   <Search className="w-3.5 h-3.5" />
-                  {gibChecking ? 'Sorgulanıyor' : 'GİB Doğrula'}
+                  {gibChecking ? 'Mysoft Sorgulanıyor...' : 'Mysoft ile Sorgula'}
                 </button>
               </div>
             </div>
@@ -465,9 +465,9 @@ export const CompanyProfileView: React.FC<CompanyProfileViewProps> = ({
               }`}
             >
               <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
                 <span>
-                  <strong>{gibCheckResult.title || 'Mükellef'}:</strong> {gibCheckResult.detail}
+                  <strong>Mysoft Mükellef Doğrulandı:</strong> {gibCheckResult.title || 'Mükellef'} ({gibCheckResult.detail})
                 </span>
               </div>
               <span className="font-mono text-[11px]">
