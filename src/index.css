@@ -1,0 +1,98 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-haze-bg: #F3F6FA;
+  --color-haze-card: #FFFFFF;
+  --color-haze-surface: #F8FAFC;
+  --color-haze-subtle: #E2E8F0;
+  --color-haze-border: #DCE4EE;
+  --color-haze-deep: #0B5FA5;
+  --color-haze-primary: #0077CC;
+  --color-haze-light: #83B8FF;
+  --color-haze-tint: #D5E8FA;
+  --color-haze-text: #0F172A;
+  --color-haze-muted: #64748B;
+}
+
+@layer base {
+  :root {
+    --font-serif-display: 'Newsreader', 'Source Serif 4', Georgia, 'Times New Roman', serif;
+    --font-display: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'IBM Plex Mono', 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  }
+
+  html {
+    font-size: 16px;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
+    font-weight: 400;
+    line-height: 1.5;
+    background-color: #F3F6FA;
+    color: #0F172A;
+    letter-spacing: -0.006em;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Editorial Serif Display used specifically on Page Title & Hero Banner Title ("Cari Hesaplar", "Cari Kartlar") */
+  .font-serif-display {
+    font-family: var(--font-serif-display);
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    font-optical-sizing: auto;
+  }
+
+  .font-display {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+  }
+
+  /* Slashed/Dotted Monospace used on KPI Values ("₺0,00", "3 cari") and financial figures */
+  .font-mono, .tabular-nums {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums slashed-zero;
+    font-feature-settings: "zero" 1;
+    letter-spacing: -0.02em;
+  }
+
+  /* Diagonal Diamond Lattice Pattern (seen on KPI Cards and Hero Banner in reference image) */
+  .pattern-diamond-lattice {
+    background-image:
+      linear-gradient(45deg, rgba(148, 163, 184, 0.085) 1px, transparent 1px),
+      linear-gradient(-45deg, rgba(148, 163, 184, 0.085) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+
+  .pattern-hero-banner {
+    background-color: #EBF4FC;
+    background-image:
+      radial-gradient(circle at 18% 50%, rgba(56, 189, 248, 0.16) 0%, transparent 45%),
+      radial-gradient(circle at 85% 30%, rgba(14, 116, 144, 0.08) 0%, transparent 45%),
+      linear-gradient(45deg, rgba(14, 116, 144, 0.055) 1px, transparent 1px),
+      linear-gradient(-45deg, rgba(14, 116, 144, 0.055) 1px, transparent 1px);
+    background-size: 100% 100%, 100% 100%, 32px 32px, 32px 32px;
+  }
+
+  /* Custom Scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #F1F5F9;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #CBD5E1;
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #0077CC;
+  }
+}

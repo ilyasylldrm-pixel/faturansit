@@ -1,0 +1,6 @@
+{
+  "name": "FaturaAkış — Pazaryeri Otomatik Faturalandırma Platformu",
+  "description": "Trendyol, Hepsiburada, Amazon ve N11 siparişleri için GİB uyumlu e-Fatura ve e-Arşiv otomasyon, KDV hesaplama ve komisyon mutabakat platformu.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
