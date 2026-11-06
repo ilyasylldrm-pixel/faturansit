@@ -10,6 +10,8 @@ import {
   ShieldCheck,
   AlertTriangle,
   Save,
+  Search,
+  Loader2,
 } from 'lucide-react';
 import {
   EInvoiceIntegrator,
@@ -17,7 +19,8 @@ import {
   PlatformUser,
   UserRole,
 } from '../types/invoicing';
-import { MARKETPLACE_CATALOG } from '../utils/invoicingEngine';
+import { MARKETPLACE_CATALOG, validateTurkishTaxIdentifier } from '../utils/invoicingEngine';
+import { checkMysoftRecipient } from '../services/mysoftClient';
 
 interface UsersAndIntegrationsViewProps {
   users: PlatformUser[];
@@ -92,6 +95,33 @@ export const UsersAndIntegrationsView: React.FC<UsersAndIntegrationsViewProps> =
     useState<EInvoiceIntegrator>('MYSOFT');
   const [userFormError, setUserFormError] = useState<string | null>(null);
   const [userFormSuccess, setUserFormSuccess] = useState<string | null>(null);
+  const [isCheckingVkn, setIsCheckingVkn] = useState(false);
+  const [vknQueryFeedback, setVknQueryFeedback] = useState<string | null>(null);
+
+  const handleQueryVkn = () => {
+    const clean = taxIdentifier.replace(/\D/g, '');
+    const valid = validateTurkishTaxIdentifier(clean, clean.length === 11 ? 'INDIVIDUAL' : 'CORPORATE', false);
+    if (!valid.valid) {
+      setUserFormError(`Geçersiz Vergi Numarası: ${valid.error}`);
+      return;
+    }
+    setUserFormError(null);
+    setIsCheckingVkn(true);
+    setVknQueryFeedback(null);
+    void checkMysoftRecipient(valid.normalizedId)
+      .then((rec) => {
+        if (rec.title) {
+          setCompanyName(rec.title);
+          setVknQueryFeedback(`Mysoft ile doğrulandı: ${rec.title} (${rec.registered ? 'Aktif e-Fatura' : 'e-Arşiv'})`);
+        } else {
+          setVknQueryFeedback('Mükellef kaydı sorgulandı.');
+        }
+      })
+      .catch((err) => {
+        setUserFormError(err instanceof Error ? err.message : 'Mysoft sorgusu başarısız.');
+      })
+      .finally(() => setIsCheckingVkn(false));
+  };
 
   // Connect Marketplace to Active User Form State
   const [mpId, setMpId] = useState<MarketplaceId>('trendyol');
@@ -408,18 +438,39 @@ export const UsersAndIntegrationsView: React.FC<UsersAndIntegrationsViewProps> =
                   >
                     Mükellef VKN (10) / TCKN (11)
                   </label>
-                  <input
-                    id="user-taxid-input"
-                    type="text"
-                    maxLength={11}
-                    value={taxIdentifier}
-                    onChange={(e) => {
-                      setTaxIdentifier(e.target.value);
-                      setUserFormError(null);
-                    }}
-                    placeholder="Örn: 8291049382"
-                    className="w-full px-3 py-2 font-mono bg-white border border-slate-300 rounded-lg text-slate-900"
-                  />
+                  <div className="flex gap-2">
+                    <input
+                      id="user-taxid-input"
+                      type="text"
+                      maxLength={11}
+                      value={taxIdentifier}
+                      onChange={(e) => {
+                        setTaxIdentifier(e.target.value.replace(/\D/g, ''));
+                        setUserFormError(null);
+                        setVknQueryFeedback(null);
+                      }}
+                      placeholder="Örn: 8291049382"
+                      className="flex-1 px-3 py-2 font-mono bg-white border border-slate-300 rounded-lg text-slate-900"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleQueryVkn}
+                      disabled={isCheckingVkn || taxIdentifier.replace(/\D/g, '').length < 10}
+                      className="px-3 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      {isCheckingVkn ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Search className="w-3.5 h-3.5" />
+                      )}
+                      <span>Sorgula</span>
+                    </button>
+                  </div>
+                  {vknQueryFeedback && (
+                    <p className="text-[11px] text-emerald-600 font-medium mt-1">
+                      ✓ {vknQueryFeedback}
+                    </p>
+                  )}
                 </div>
               </div>
 

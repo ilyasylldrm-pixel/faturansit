@@ -15,6 +15,7 @@ import {
 } from '../types/invoicing';
 import { validateTurkishTaxIdentifier } from '../utils/invoicingEngine';
 import { checkMysoftRecipient } from '../services/mysoftClient';
+import { parseTurkishAddress } from '../utils/addressParser';
 
 interface AppOwnerProfileViewProps {
   appOwnerProfile: AppOwnerProfile;
@@ -44,6 +45,7 @@ export const AppOwnerProfileView: React.FC<AppOwnerProfileViewProps> = ({
     title: string;
     date: string;
     detail?: string;
+    appliedFields?: string[];
   } | null>(null);
   const [mysoftChecking, setMysoftChecking] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -87,15 +89,43 @@ export const AppOwnerProfileView: React.FC<AppOwnerProfileViewProps> = ({
           return;
         }
 
+        const parsed = parseTurkishAddress(
+          recipient.address || '',
+          recipient.district,
+          recipient.city
+        );
+
+        const neighborhood = recipient.neighborhood || parsed.neighborhood || '';
+        const street = recipient.street || parsed.street || '';
+        const district = recipient.district || parsed.district || '';
+        const city = recipient.city || parsed.city || '';
+        const postalCode = recipient.postalCode || parsed.postalCode || '';
+        const fullAddress = recipient.address || parsed.fullAddress || [neighborhood, street, district, city].filter(Boolean).join(' ');
+
         setFormData((prev) => ({
           ...prev,
           legalTitle: recipient.title || prev.legalTitle,
           taxOffice: recipient.taxOffice || prev.taxOffice,
-          city: recipient.city || prev.city,
-          district: recipient.district || prev.district,
-          addressLine: recipient.address || prev.addressLine,
+          city: city || prev.city,
+          district: district || prev.district,
+          neighborhood: neighborhood || prev.neighborhood,
+          street: street || prev.street,
+          postalCode: postalCode || prev.postalCode,
+          addressLine: fullAddress || prev.addressLine,
+          mersisNumber: prev.mersisNumber || (cleanVkn.length === 10 ? `0${cleanVkn}00001` : prev.mersisNumber),
           eInvoiceStatus: recipient.registered ? 'REGISTERED' : 'NOT_REGISTERED',
         }));
+
+        const applied = [
+          neighborhood ? `Mahalle: ${neighborhood}` : '',
+          street ? `Sokak/Cadde: ${street}` : '',
+          district ? `İlçe: ${district}` : '',
+          city ? `İl: ${city}` : '',
+          postalCode ? `Posta Kodu: ${postalCode}` : '',
+          recipient.taxOffice ? `Vergi Dairesi: ${recipient.taxOffice}` : '',
+          recipient.title ? 'Resmi Unvan' : '',
+          'GİB Mükellef Durumu',
+        ].filter(Boolean);
 
         setGibCheckResult({
           tested: true,
@@ -105,6 +135,7 @@ export const AppOwnerProfileView: React.FC<AppOwnerProfileViewProps> = ({
           detail: recipient.registered
             ? 'Mysoft üzerinden Aktif e-Fatura mükellefi olarak doğrulandı'
             : 'Mysoft üzerinden e-Arşiv mükellefi olarak doğrulandı (e-Fatura posta kutusu yok)',
+          appliedFields: applied,
         });
       })
       .catch((error: unknown) => {
@@ -431,22 +462,37 @@ export const AppOwnerProfileView: React.FC<AppOwnerProfileViewProps> = ({
 
           {gibCheckResult && (
             <div
-              className={`mt-3 p-3 border rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs ${
+              className={`mt-3 p-3 border rounded-lg flex flex-col gap-2 text-xs ${
                 gibCheckResult.registered
                   ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
                   : 'bg-amber-50 border-amber-200 text-amber-900'
               }`}
             >
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>
-                  <strong>Mysoft Mükellef Doğrulandı:</strong> {gibCheckResult.title} (
-                  {gibCheckResult.detail ?? (gibCheckResult.registered ? 'Aktif e-Fatura Mükellefi' : 'e-Arşiv Mükellefi')})
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>
+                    <strong>Mysoft Mükellef Doğrulandı:</strong> {gibCheckResult.title} (
+                    {gibCheckResult.detail ?? (gibCheckResult.registered ? 'Aktif e-Fatura Mükellefi' : 'e-Arşiv Mükellefi')})
+                  </span>
+                </div>
+                <span className="font-mono text-[11px] text-slate-500">
+                  Sorgu Zamanı: {gibCheckResult.date}
                 </span>
               </div>
-              <span className="font-mono text-[11px] text-slate-500">
-                Sorgu Zamanı: {gibCheckResult.date}
-              </span>
+              {gibCheckResult.appliedFields && gibCheckResult.appliedFields.length > 0 && (
+                <div className="pt-2 border-t border-emerald-200/60 flex flex-wrap items-center gap-1.5 text-[11px]">
+                  <span className="font-semibold text-emerald-950">İlgili Alanlara Aktarıldı:</span>
+                  {gibCheckResult.appliedFields.map((field, idx) => (
+                    <span
+                      key={idx}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white border border-emerald-300 font-medium text-emerald-800 shadow-2xs"
+                    >
+                      ✓ {field}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -466,17 +512,66 @@ export const AppOwnerProfileView: React.FC<AppOwnerProfileViewProps> = ({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
-            <div className="lg:col-span-2">
-              <label htmlFor="owner-address" className="block font-semibold text-slate-700 mb-1">
-                Merkez Tebligat Adresi (Cadde, Sokak, Kapı No) *
+            <div>
+              <label htmlFor="owner-city" className="block font-semibold text-slate-700 mb-1">
+                İl / Şehir *
               </label>
               <input
-                id="owner-address"
+                id="owner-city"
                 type="text"
                 required
-                value={formData.addressLine}
+                value={formData.city}
                 onChange={(e) =>
-                  setFormData({ ...formData, addressLine: e.target.value })
+                  setFormData({ ...formData, city: e.target.value })
+                }
+                placeholder="Örn: İstanbul"
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-slate-900 focus:bg-white focus:outline-2 focus:outline-blue-600"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="owner-district" className="block font-semibold text-slate-700 mb-1">
+                İlçe *
+              </label>
+              <input
+                id="owner-district"
+                type="text"
+                required
+                value={formData.district}
+                onChange={(e) =>
+                  setFormData({ ...formData, district: e.target.value })
+                }
+                placeholder="Örn: Beşiktaş"
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-slate-900 focus:bg-white focus:outline-2 focus:outline-blue-600"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="owner-neighborhood" className="block font-semibold text-slate-700 mb-1">
+                Mahalle (Sorgulamadan Aktarılan)
+              </label>
+              <input
+                id="owner-neighborhood"
+                type="text"
+                value={formData.neighborhood || ''}
+                onChange={(e) =>
+                  setFormData({ ...formData, neighborhood: e.target.value })
+                }
+                placeholder="Örn: Levent Mah."
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-slate-900 focus:bg-white focus:outline-2 focus:outline-blue-600"
+              />
+            </div>
+
+            <div className="lg:col-span-2">
+              <label htmlFor="owner-street" className="block font-semibold text-slate-700 mb-1">
+                Cadde / Sokak / Kapı No (Sorgulamadan Aktarılan)
+              </label>
+              <input
+                id="owner-street"
+                type="text"
+                value={formData.street || ''}
+                onChange={(e) =>
+                  setFormData({ ...formData, street: e.target.value })
                 }
                 placeholder="Örn: Büyükdere Cad. No: 193 Kanyon Ofis Bloğu K: 12 D: 24"
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-slate-900 focus:bg-white focus:outline-2 focus:outline-blue-600"
@@ -503,36 +598,19 @@ export const AppOwnerProfileView: React.FC<AppOwnerProfileViewProps> = ({
               />
             </div>
 
-            <div>
-              <label htmlFor="owner-district" className="block font-semibold text-slate-700 mb-1">
-                İlçe *
+            <div className="lg:col-span-3">
+              <label htmlFor="owner-address" className="block font-semibold text-slate-700 mb-1">
+                Açık / Tam Merkez Tebligat Adresi (Faturada Yer Alacak Metin) *
               </label>
               <input
-                id="owner-district"
+                id="owner-address"
                 type="text"
                 required
-                value={formData.district}
+                value={formData.addressLine}
                 onChange={(e) =>
-                  setFormData({ ...formData, district: e.target.value })
+                  setFormData({ ...formData, addressLine: e.target.value })
                 }
-                placeholder="Örn: Beşiktaş"
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-slate-900 focus:bg-white focus:outline-2 focus:outline-blue-600"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="owner-city" className="block font-semibold text-slate-700 mb-1">
-                İl / Şehir *
-              </label>
-              <input
-                id="owner-city"
-                type="text"
-                required
-                value={formData.city}
-                onChange={(e) =>
-                  setFormData({ ...formData, city: e.target.value })
-                }
-                placeholder="Örn: İstanbul"
+                placeholder="Örn: Levent Mah. Büyükdere Cad. No: 193 Kanyon Ofis Bloğu K: 12 D: 24 Beşiktaş İstanbul"
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-slate-900 focus:bg-white focus:outline-2 focus:outline-blue-600"
               />
             </div>

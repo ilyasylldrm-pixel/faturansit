@@ -95,6 +95,8 @@ export interface CompanyProfile {
 
   // İletişim & Tebligat Adres
   addressLine: string;
+  neighborhood?: string; // Mahalle (Örn: Levent Mah.)
+  street?: string; // Cadde / Sokak / Kapı No (Örn: Büyükdere Cad. No: 193)
   district: string;
   city: string;
   postalCode: string;
@@ -136,6 +138,8 @@ export interface AppOwnerProfile {
 
   // İletişim & Tebligat Adresi
   addressLine: string;
+  neighborhood?: string; // Mahalle (Örn: Levent Mah.)
+  street?: string; // Cadde / Sokak / Kapı No (Örn: Büyükdere Cad. No: 193)
   district: string;
   city: string;
   postalCode: string;

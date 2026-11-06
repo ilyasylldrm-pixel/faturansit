@@ -545,9 +545,29 @@ export function createMysoftRouter(client = new MysoftClient(readMysoftConfig())
         taxOffice: 'Maslak Vergi Dairesi',
         city: 'İstanbul',
         district: 'Beşiktaş',
-        address: 'Büyükdere Cad. No: 193 Kanyon Ofis K: 8 D: 14 Beşiktaş İstanbul',
+        neighborhood: 'Levent Mah.',
+        street: 'Büyükdere Cad. No: 193 Kanyon Ofis K: 8 D: 14',
+        postalCode: '34394',
+        address: 'Levent Mah. Büyükdere Cad. No: 193 Kanyon Ofis K: 8 D: 14 Beşiktaş İstanbul',
         registered: true,
         pkAlias: 'urn:mail:defaultpk@faturansit.com',
+        gbAlias: 'urn:mail:defaultgb@faturansit.com',
+      };
+    }
+    if (vknTckn === '3890642158') {
+      return {
+        vknTckn,
+        title: 'ANADOLU DİJİTAL TİCARET VE LOJİSTİK A.Ş.',
+        taxOffice: 'Büyük Mükellefler Vergi Dairesi',
+        city: 'İstanbul',
+        district: 'Beşiktaş',
+        neighborhood: 'Levent Mah.',
+        street: 'Büyükdere Cad. No: 193 Kanyon Ofis Bloğu K: 12 D: 24',
+        postalCode: '34394',
+        address: 'Levent Mah. Büyükdere Cad. No: 193 Kanyon Ofis Bloğu K: 12 D: 24 Beşiktaş İstanbul',
+        registered: true,
+        pkAlias: 'urn:mail:defaultpk@anadoludijital.com.tr',
+        gbAlias: 'urn:mail:defaultgb@anadoludijital.com.tr',
       };
     }
     if (vknTckn === '4840847211') {
@@ -557,9 +577,13 @@ export function createMysoftRouter(client = new MysoftClient(readMysoftConfig())
         taxOffice: 'Beşiktaş Vergi Dairesi',
         city: 'İstanbul',
         district: 'Beşiktaş',
-        address: 'Barbaros Bulvarı No: 42 Beşiktaş İstanbul',
+        neighborhood: 'Gayrettepe Mah.',
+        street: 'Barbaros Bulvarı No: 42 D: 8',
+        postalCode: '34349',
+        address: 'Gayrettepe Mah. Barbaros Bulvarı No: 42 D: 8 Beşiktaş İstanbul',
         registered: true,
         pkAlias: 'urn:mail:defaultpk@teknolojimarket.com.tr',
+        gbAlias: 'urn:mail:defaultgb@teknolojimarket.com.tr',
       };
     }
     if (vknTckn === '5492810482') {
@@ -569,23 +593,37 @@ export function createMysoftRouter(client = new MysoftClient(readMysoftConfig())
         taxOffice: 'Beyoğlu Vergi Dairesi',
         city: 'İstanbul',
         district: 'Şişli',
-        address: 'Halaskargazi Cad. No: 88 Şişli İstanbul',
+        neighborhood: 'Merkez Mah.',
+        street: 'Halaskargazi Cad. No: 88 K: 3',
+        postalCode: '34360',
+        address: 'Merkez Mah. Halaskargazi Cad. No: 88 K: 3 Şişli İstanbul',
         registered: true,
         pkAlias: 'urn:mail:defaultpk@trendmoda.com.tr',
+        gbAlias: 'urn:mail:defaultgb@trendmoda.com.tr',
       };
     }
     const isIndividual = vknTckn.length === 11;
+    const city = 'İstanbul';
+    const district = isIndividual ? 'Kadıköy' : 'Beşiktaş';
+    const neighborhood = isIndividual ? 'Caddebostan Mah.' : 'Levent Mah.';
+    const street = isIndividual
+      ? 'Bağdat Caddesi No: 120 D: 4'
+      : 'Büyükdere Cad. Plaza No: 28 K: 5';
+    const postalCode = isIndividual ? '34728' : '34394';
+    const address = `${neighborhood} ${street} ${district} ${city}`;
     return {
       vknTckn,
       title: isIndividual ? 'TİCARİ İŞLETME SAHİBİ (ŞAHIS FİRMASI)' : 'TİCARET VE SANAYİ LİMİTED ŞİRKETİ',
-      taxOffice: 'Marmara Vergi Dairesi',
-      city: 'İstanbul',
-      district: isIndividual ? 'Kadıköy' : 'Beşiktaş',
-      address: isIndividual
-        ? 'Bağdat Caddesi No: 120 D: 4 Kadıköy İstanbul'
-        : 'Büyükdere Cad. Plaza No: 28 K: 5 Levent İstanbul',
+      taxOffice: isIndividual ? 'Kadıköy Vergi Dairesi' : 'Beşiktaş Vergi Dairesi',
+      city,
+      district,
+      neighborhood,
+      street,
+      postalCode,
+      address,
       registered: !isIndividual,
       pkAlias: !isIndividual ? `urn:mail:defaultpk@vkn${vknTckn}.com` : '',
+      gbAlias: !isIndividual ? `urn:mail:defaultgb@vkn${vknTckn}.com` : '',
     };
   }
 

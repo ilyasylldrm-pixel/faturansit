@@ -44,9 +44,13 @@ export interface MysoftRecipient {
   taxOffice: string;
   city: string;
   district: string;
+  neighborhood?: string;
+  street?: string;
+  postalCode?: string;
   address: string;
   registered: boolean;
   pkAlias: string;
+  gbAlias?: string;
 }
 
 export interface MysoftSellerInput {

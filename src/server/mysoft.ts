@@ -48,9 +48,13 @@ export interface MysoftRecipient {
   taxOffice: string;
   city: string;
   district: string;
+  neighborhood?: string;
+  street?: string;
+  postalCode?: string;
   address: string;
   registered: boolean;
   pkAlias: string;
+  gbAlias?: string;
 }
 
 export class MysoftError extends Error {
@@ -492,25 +496,56 @@ export class MysoftClient {
       const type = pickString(alias, ['aliasType', 'gibAliasType', 'type']).toUpperCase();
       return type.includes('PK') || type === '';
     });
+    const gb = aliases.map(asRecord).find((alias) => {
+      const type = pickString(alias, ['aliasType', 'gibAliasType', 'type']).toUpperCase();
+      return type.includes('GB');
+    });
     const pkAlias = pickString(pk ?? null, ['alias', 'pkAlias', 'gibAlias']);
+    const gbAlias = pickString(gb ?? null, ['alias', 'gbAlias', 'gibAlias']);
     const activity = pickString(taxpayer, ['activityTerminationStatus']);
     const title =
       pickString(taxpayer, ['identityTitle', 'tradeName', 'title', 'name']) ||
       pickString(gib, ['title', 'accountName']);
     const city = pickString(addressRow, ['cityName', 'city']) || pickString(taxpayer, ['cityName', 'city']);
     const district =
-      pickString(addressRow, ['citySubdivision', 'district', 'town']) ||
-      pickString(taxpayer, ['district']);
-    const street = pickString(addressRow, ['streetName', 'street', 'address']);
+      pickString(addressRow, ['citySubdivision', 'district', 'town', 'districtName']) ||
+      pickString(taxpayer, ['district', 'citySubdivision']);
+    const neighborhood =
+      pickString(addressRow, ['subdivision', 'neighborhood', 'neighborhoodName', 'mahalle']) ||
+      pickString(taxpayer, ['subdivision', 'neighborhood', 'neighborhoodName', 'mahalle']);
+    const street =
+      pickString(addressRow, ['streetName', 'street', 'cadde', 'sokak']) ||
+      pickString(taxpayer, ['streetName', 'street', 'cadde', 'sokak']);
+    const buildingNumber = pickString(addressRow, ['buildingNumber', 'buildingNo', 'binaNo']);
+    const doorNumber = pickString(addressRow, ['doorNumber', 'doorNo', 'kapiNo']);
+    const postalCode =
+      pickString(addressRow, ['postalZone', 'postCode', 'postalCode']) ||
+      pickString(taxpayer, ['postalZone', 'postCode', 'postalCode']);
+
+    const streetWithNo = [
+      street,
+      buildingNumber ? `No: ${buildingNumber}` : '',
+      doorNumber ? `D: ${doorNumber}` : '',
+    ].filter(Boolean).join(' ') || street;
+
+    const rawAddress = pickString(addressRow, ['fullAddress', 'address', 'addressLine']) ||
+      pickString(taxpayer, ['fullAddress', 'address']);
+
+    const fullAddress = rawAddress || [neighborhood, streetWithNo, district, city].filter(Boolean).join(' ');
+
     return {
       vknTckn,
       title,
       taxOffice: pickString(taxpayer, ['taxOfficeName', 'taxOffice']),
       city,
       district,
-      address: [street, district, city].filter(Boolean).join(' '),
+      neighborhood: neighborhood || undefined,
+      street: streetWithNo || undefined,
+      postalCode: postalCode || undefined,
+      address: fullAddress,
       registered: aliases.length > 0 || activity === '1',
       pkAlias,
+      gbAlias,
     };
   }
 }
