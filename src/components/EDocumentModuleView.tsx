@@ -74,8 +74,6 @@ interface EDocumentModuleViewProps {
 
 const INTEGRATOR_OPTIONS: Array<{ value: EInvoiceIntegrator; label: string }> =
   [
-    { value: 'FATURANSIT', label: 'Faturansit Özel Entegratör' },
-    { value: 'GIB_PORTAL', label: 'GİB Portal Arşiv' },
     { value: 'MYSOFT', label: 'Mysoft e-Belge' },
   ];
 

@@ -41,19 +41,9 @@ const INTEGRATOR_OPTIONS: Array<{
   desc: string;
 }> = [
   {
-    value: 'FATURANSIT',
-    label: 'Faturansit Özel Entegratör API',
-    desc: 'Tam otomatik GİB UBL-TR 2.1 doğrudan bulut entegrasyonu',
-  },
-  {
-    value: 'GIB_PORTAL',
-    label: 'GİB Portal Arşiv Doğrudan Bağlantı',
-    desc: 'GİB interaktif portal doğrudan kuyruk protokolü',
-  },
-  {
     value: 'MYSOFT',
     label: 'Mysoft e-Belge',
-    desc: 'Test ve canlı Mysoft e-fatura / e-arşiv API',
+    desc: 'GİB UBL-TR 2.1 Mysoft e-Fatura / e-Arşiv Özel Entegratör API',
   },
 ];
 

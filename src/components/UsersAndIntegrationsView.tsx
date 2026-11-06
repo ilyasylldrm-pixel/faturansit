@@ -60,9 +60,9 @@ const ROLE_LABELS: Record<UserRole, string> = {
 };
 
 const INTEGRATOR_LABELS: Record<EInvoiceIntegrator, string> = {
-  FATURANSIT: 'Faturansit Özel Entegratör',
-  GIB_PORTAL: 'GİB Portal',
   MYSOFT: 'Mysoft e-Belge',
+  FATURANSIT: 'Mysoft e-Belge',
+  GIB_PORTAL: 'Mysoft e-Belge',
 };
 
 export const UsersAndIntegrationsView: React.FC<UsersAndIntegrationsViewProps> = ({
@@ -89,7 +89,7 @@ export const UsersAndIntegrationsView: React.FC<UsersAndIntegrationsViewProps> =
   const [companyName, setCompanyName] = useState('');
   const [taxIdentifier, setTaxIdentifier] = useState('');
   const [eInvoiceIntegrator, setEInvoiceIntegrator] =
-    useState<EInvoiceIntegrator>('FATURANSIT');
+    useState<EInvoiceIntegrator>('MYSOFT');
   const [userFormError, setUserFormError] = useState<string | null>(null);
   const [userFormSuccess, setUserFormSuccess] = useState<string | null>(null);
 
@@ -458,8 +458,6 @@ export const UsersAndIntegrationsView: React.FC<UsersAndIntegrationsViewProps> =
                     }
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-slate-900"
                   >
-                    <option value="FATURANSIT">Faturansit Özel Entegratör</option>
-                    <option value="GIB_PORTAL">GİB Portal</option>
                     <option value="MYSOFT">Mysoft e-Belge</option>
                   </select>
                 </div>

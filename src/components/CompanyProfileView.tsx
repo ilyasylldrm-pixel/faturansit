@@ -778,11 +778,7 @@ export const CompanyProfileView: React.FC<CompanyProfileViewProps> = ({
               <div className="flex justify-between">
                 <span className="text-slate-500">Entegratör:</span>
                 <span className="font-medium text-slate-800">
-                  {formData.integrator === 'FATURANSIT'
-                    ? 'Faturansit Özel Entegratör'
-                    : formData.integrator === 'GIB_PORTAL'
-                    ? 'GİB Portal'
-                    : 'Mysoft e-Belge'}
+                  Mysoft e-Belge
                 </span>
               </div>
             </div>
