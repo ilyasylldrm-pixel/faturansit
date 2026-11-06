@@ -49,6 +49,7 @@ import {
   validateAndCreatePlatformUser,
   validateTurkishTaxIdentifier,
 } from './utils/invoicingEngine';
+import { issueMysoftInvoice } from './services/mysoftClient';
 import { ActiveTab, TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
 import { OrdersQueueView } from './components/OrdersQueueView';
@@ -203,12 +204,123 @@ export default function App() {
     }
   };
 
+  const sellerForOrder = (order: MarketplaceOrder) => {
+    const profile =
+      (order.ownerUserId && companyProfiles[order.ownerUserId]) ||
+      companyProfiles[selectedUserId];
+    const user =
+      users.find((item) => item.id === order.ownerUserId) ||
+      users.find((item) => item.id === selectedUserId);
+    return {
+      taxIdentifier: profile?.taxIdentifier || user?.taxIdentifier || '',
+      legalTitle: profile?.legalTitle || user?.companyName || '',
+      taxOffice: profile?.taxOffice || '',
+      city: profile?.city || '',
+      district: profile?.district || '',
+      addressLine: profile?.addressLine || '',
+    };
+  };
+
+  const pushOrderToMysoft = async (
+    order: MarketplaceOrder,
+    allowDefaultTckn: boolean
+  ) => {
+    const validation = validateTurkishTaxIdentifier(
+      order.taxIdentifier,
+      order.customerType,
+      allowDefaultTckn
+    );
+    if (!validation.valid) {
+      return {
+        success: false as const,
+        error: validation.error,
+        order: {
+          ...order,
+          invoiceStatus: 'ERROR_TAX_ID' as const,
+          invoiceErrorReason: validation.error,
+        },
+      };
+    }
+    const ready: MarketplaceOrder = {
+      ...order,
+      taxIdentifier: validation.normalizedId,
+    };
+    try {
+      const result = await issueMysoftInvoice({
+        order: ready,
+        seller: sellerForOrder(ready),
+        preferredScenario: 'TICARIFATURA',
+        eInvoicePrefix: systemSettings.eInvoicePrefix,
+        eArchivePrefix: systemSettings.eArchivePrefix,
+      });
+      const invoicedAt = new Date()
+        .toLocaleString('sv-SE', { timeZone: 'Europe/Istanbul', hour12: false })
+        .slice(0, 16);
+      return {
+        success: true as const,
+        order: {
+          ...ready,
+          invoiceStatus: 'INVOICED' as const,
+          invoiceErrorReason: undefined,
+          gibInvoiceNumber: result.docNo || undefined,
+          ettn: result.ettn || undefined,
+          documentType: result.documentType,
+          scenario: result.scenario,
+          invoicedAt,
+        },
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Mysoft faturayı kabul etmedi.';
+      return {
+        success: false as const,
+        error: message,
+        order: {
+          ...ready,
+          invoiceStatus: 'PENDING' as const,
+          invoiceErrorReason: message,
+        },
+      };
+    }
+  };
+
   const handleIssueSingleInvoice = (
     orderId: string,
     allowDefaultTckn = false
   ) => {
     const target = orders.find((o) => o.id === orderId);
     if (!target) return;
+
+    if (systemSettings.primaryGibIntegrator === 'MYSOFT') {
+      void pushOrderToMysoft(target, allowDefaultTckn).then((result) => {
+        setOrders((prev) => prev.map((order) => (order.id === orderId ? result.order : order)));
+        if (result.success) {
+          setSelectedOrderIds((prev) => prev.filter((id) => id !== orderId));
+          const gibNo = result.order.gibInvoiceNumber || result.order.ettn || 'Mysoft';
+          setBannerMessage({
+            type: 'success',
+            text: `#${target.marketplaceOrderNumber} siparişi Mysoft'a iletildi (${gibNo}).`,
+          });
+          appendAuditLog(
+            'FATURA_KESIMI',
+            `#${target.marketplaceOrderNumber} (${target.customerName}) Mysoft'a gönderildi.`,
+            gibNo,
+            'SUCCESS'
+          );
+        } else {
+          setBannerMessage({
+            type: 'warning',
+            text: `#${target.marketplaceOrderNumber} faturası kesilemedi: ${result.error}`,
+          });
+          appendAuditLog(
+            'FATURA_KESIMI',
+            `#${target.marketplaceOrderNumber} Mysoft gönderimi durdu: ${result.error}`,
+            `#${target.marketplaceOrderNumber}`,
+            'WARNING'
+          );
+        }
+      });
+      return;
+    }
 
     const { documentType } = determineDocumentType(target);
     const prefix = getIntegratorPrefixForDocument(documentType, systemSettings);
@@ -251,6 +363,37 @@ export default function App() {
 
   const handleIssueSelectedInvoices = () => {
     if (selectedOrderIds.length === 0) return;
+
+    if (systemSettings.primaryGibIntegrator === 'MYSOFT') {
+      void (async () => {
+        let successCount = 0;
+        let failCount = 0;
+        const next = orders.map((order) => ({ ...order }));
+        for (const id of selectedOrderIds) {
+          const index = next.findIndex((order) => order.id === id);
+          if (index < 0 || next[index].invoiceStatus === 'INVOICED') continue;
+          const result = await pushOrderToMysoft(next[index], true);
+          next[index] = result.order;
+          if (result.success) successCount += 1;
+          else failCount += 1;
+        }
+        setOrders(next);
+        setSelectedOrderIds([]);
+        setBannerMessage({
+          type: successCount > 0 ? 'success' : 'warning',
+          text: `Mysoft toplu kesim: ${successCount} belge iletildi${
+            failCount > 0 ? `, ${failCount} sipariş gönderilemedi.` : '.'
+          }`,
+        });
+        appendAuditLog(
+          'FATURA_KESIMI',
+          `Seçili siparişler Mysoft'a gönderildi (${successCount} başarılı).`,
+          `TOPLU-${successCount}`,
+          successCount > 0 ? 'SUCCESS' : 'WARNING'
+        );
+      })();
+      return;
+    }
 
     let currentSeq = invoiceSequence;
     let successCount = 0;
@@ -295,6 +438,13 @@ export default function App() {
   };
 
   const handleRunRulesNow = () => {
+    if (systemSettings.primaryGibIntegrator === 'MYSOFT') {
+      setBannerMessage({
+        type: 'warning',
+        text: 'Mysoft açıkken otomasyon yerel numara basmaz. Siparişi veya seçilenleri Mysoft’a gönderin.',
+      });
+      return { invoicedCount: 0, failedCount: 0, logs: [] as string[] };
+    }
     const res = evaluateAutomationRules(
       orders,
       rules,
@@ -1067,6 +1217,7 @@ export default function App() {
                 orders={orders}
                 incomingInvoices={incomingInvoices}
                 systemSettings={systemSettings}
+                tenantIdentifierNumber={companyProfiles[selectedUserId]?.taxIdentifier}
                 onUpdateSystemSettings={(next) => {
                   setSystemSettings(next);
                   appendAuditLog(
@@ -1174,6 +1325,11 @@ export default function App() {
       {/* GİB Official e-Belge Preview & UBL-TR 2.1 XML Modal */}
       <GibInvoiceModal
         order={previewOrder}
+        tenantIdentifierNumber={
+          previewOrder
+            ? companyProfiles[previewOrder.ownerUserId || selectedUserId]?.taxIdentifier
+            : undefined
+        }
         onClose={() => setPreviewOrder(null)}
       />
     </div>

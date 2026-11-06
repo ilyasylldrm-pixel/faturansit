@@ -31,7 +31,8 @@ export type UserRole = 'ADMIN' | 'ACCOUNTANT' | 'OPERATIONS';
 
 export type EInvoiceIntegrator =
   | 'FATURANSIT'
-  | 'GIB_PORTAL';
+  | 'GIB_PORTAL'
+  | 'MYSOFT';
 
 export interface UserMarketplaceCredential {
   id: string;
