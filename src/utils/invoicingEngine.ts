@@ -11,6 +11,8 @@ import {
   OrderLineItem,
   PlatformUser,
   TaxReconciliationSummary,
+  TgoMealPackageStatus,
+  TgoUnsuppliedReasonCode,
   UserMarketplaceCredential,
   UserRole,
 } from '../types/invoicing';
@@ -29,6 +31,12 @@ export const MARKETPLACE_CATALOG: Record<
     defaultPrefix: 'TRD',
     defaultCommission: 16.5,
     authType: 'Supplier ID + API Key + API Secret',
+  },
+  trendyol_yemek: {
+    name: 'Trendyol Go - Yemek',
+    defaultPrefix: 'TGY',
+    defaultCommission: 12.0,
+    authType: 'Supplier ID + Restoran ID + Basic Auth (tgoapis.com)',
   },
   hepsiburada: {
     name: 'Hepsiburada',
@@ -397,6 +405,13 @@ export function issueInvoiceForOrder(
   const gibInvoiceNumber = generateGibInvoiceNumber(seriesPrefix, 2026, sequence);
   const ettn = generateDeterministicEttn(order.id, sequence);
 
+  const isTgoMeal = order.marketplace === 'trendyol_yemek';
+  const nextTgoStatus = isTgoMeal
+    ? order.tgoPackageStatus === 'Delivered' || order.tgoPackageStatus === 'Shipped'
+      ? order.tgoPackageStatus
+      : 'Invoiced'
+    : order.tgoPackageStatus;
+
   const updatedOrder: MarketplaceOrder = {
     ...order,
     taxIdentifier: validation.normalizedId,
@@ -407,6 +422,13 @@ export function issueInvoiceForOrder(
     documentType,
     scenario,
     invoicedAt: options?.timestamp ?? '2026-11-04 16:25',
+    ...(isTgoMeal
+      ? {
+          tgoPackageStatus: nextTgoStatus,
+          tgoInvoiceLinkSent: true,
+          tgoInvoiceLinkUrl: `https://faturansit.com.tr/e-belge/tgo-meal/${ettn}.pdf`,
+        }
+      : {}),
   };
 
   return {
@@ -594,22 +616,35 @@ export function computeTaxAndCommissionReport(
       order.withholdingRate
     );
 
-    const mpEntry = mpMap.get(order.marketplace);
-    if (mpEntry) {
-      mpEntry.orderCount += 1;
-      if (order.invoiceStatus === 'INVOICED') {
-        mpEntry.invoicedCount += 1;
-      }
-      mpEntry.grossSales = roundCurrency(mpEntry.grossSales + fin.grossInvoiceTotal);
-      mpEntry.vatTotal = roundCurrency(mpEntry.vatTotal + fin.totalVat);
-      mpEntry.commissionAmount = roundCurrency(
-        mpEntry.commissionAmount + fin.marketplaceCommissionAmount
-      );
-      mpEntry.withholdingAmount = roundCurrency(
-        mpEntry.withholdingAmount + fin.withholdingTaxAmount
-      );
-      mpEntry.netPayout = roundCurrency(mpEntry.netPayout + fin.netSellerPayout);
+    let mpEntry = mpMap.get(order.marketplace);
+    if (!mpEntry) {
+      const cat = MARKETPLACE_CATALOG[order.marketplace];
+      mpEntry = {
+        marketplace: order.marketplace,
+        name: cat ? cat.name : order.marketplace.toUpperCase(),
+        orderCount: 0,
+        invoicedCount: 0,
+        grossSales: 0,
+        vatTotal: 0,
+        commissionAmount: 0,
+        withholdingAmount: 0,
+        netPayout: 0,
+      };
+      mpMap.set(order.marketplace, mpEntry);
     }
+    mpEntry.orderCount += 1;
+    if (order.invoiceStatus === 'INVOICED') {
+      mpEntry.invoicedCount += 1;
+    }
+    mpEntry.grossSales = roundCurrency(mpEntry.grossSales + fin.grossInvoiceTotal);
+    mpEntry.vatTotal = roundCurrency(mpEntry.vatTotal + fin.totalVat);
+    mpEntry.commissionAmount = roundCurrency(
+      mpEntry.commissionAmount + fin.marketplaceCommissionAmount
+    );
+    mpEntry.withholdingAmount = roundCurrency(
+      mpEntry.withholdingAmount + fin.withholdingTaxAmount
+    );
+    mpEntry.netPayout = roundCurrency(mpEntry.netPayout + fin.netSellerPayout);
 
     totalMatrah = roundCurrency(totalMatrah + fin.subtotalExclVat);
     totalVat = roundCurrency(totalVat + fin.totalVat);
@@ -888,6 +923,11 @@ export function validateAndConnectUserMarketplace(
     defaultCommissionRate: number;
     autoSyncIntervalMinutes: number;
     webhookEnabled: boolean;
+    tgoStoreBranchId?: string;
+    tgoEnvironment?: 'PROD' | 'STAGE';
+    tgoAgentName?: string;
+    tgoAutoAcceptOrders?: boolean;
+    tgoAutoSendInvoiceLink?: boolean;
   }
 ): {
   valid: boolean;
@@ -917,7 +957,7 @@ export function validateAndConnectUserMarketplace(
   if (!/^[A-Z0-9]{3}$/.test(prefix)) {
     return {
       valid: false,
-      error: 'GİB Fatura Seri Öneki tam 3 karakterli harf/rakam olmalıdır (Örn: TRD, HPS, IDF).',
+      error: 'GİB Fatura Seri Öneki tam 3 karakterli harf/rakam olmalıdır (Örn: TRD, HPS, TGY).',
     };
   }
   if (
@@ -945,6 +985,7 @@ export function validateAndConnectUserMarketplace(
 
   const catalogInfo = MARKETPLACE_CATALOG[input.marketplace];
   const credentialId = `cred-${Date.now()}-${Math.floor(100 + Math.random() * 899)}`;
+  const isTgoMeal = input.marketplace === 'trendyol_yemek';
 
   const credential: UserMarketplaceCredential = {
     id: credentialId,
@@ -960,6 +1001,15 @@ export function validateAndConnectUserMarketplace(
     webhookEnabled: input.webhookEnabled,
     apiStatus: 'CONNECTED',
     connectedAt: '2026-11-04 16:48',
+    ...(isTgoMeal
+      ? {
+          tgoStoreBranchId: (input.tgoStoreBranchId || '').trim() || 'REST-88120',
+          tgoEnvironment: input.tgoEnvironment || 'PROD',
+          tgoAgentName: (input.tgoAgentName || '').trim() || 'Faturansit',
+          tgoAutoAcceptOrders: input.tgoAutoAcceptOrders ?? true,
+          tgoAutoSendInvoiceLink: input.tgoAutoSendInvoiceLink ?? true,
+        }
+      : {}),
   };
 
   const updatedUser: PlatformUser = {
@@ -983,6 +1033,15 @@ export function validateAndConnectUserMarketplace(
     lastSyncAt: '2026-11-04 16:48',
     pendingOrderCount: 0,
     monthlyVolumeTry: 0,
+    ...(isTgoMeal
+      ? {
+          tgoStoreBranchId: credential.tgoStoreBranchId,
+          tgoEnvironment: credential.tgoEnvironment,
+          tgoAgentName: credential.tgoAgentName,
+          tgoAutoAcceptOrders: credential.tgoAutoAcceptOrders,
+          tgoAutoSendInvoiceLink: credential.tgoAutoSendInvoiceLink,
+        }
+      : {}),
   };
 
   return {
@@ -1021,4 +1080,255 @@ export function deletePlatformUser(
     deletedUser: target,
   };
 }
+
+// ============================================================================
+// TRENDYOL GO - YEMEK (developers.tgoapps.com) SİPARİŞ & FATURA ENTEGRASYONU
+// ============================================================================
+
+export const TGO_YEMEK_API_CONFIG = {
+  prodBaseUrl: 'https://api.tgoapis.com',
+  stageBaseUrl: 'https://stageapi.tgoapis.com',
+  invoiceChannelId: 4, // Trendyol Go - Yemek e-Fatura/e-Arşiv besleme sabit kanal kodu (channelId = 4)
+  rateLimitPer10Seconds: 50,
+  endpoints: {
+    getPackages: (supplierId: string) =>
+      `/integrator/order/meal/suppliers/${supplierId}/packages`,
+    acceptPackagePicked: (supplierId: string) =>
+      `/integrator/order/meal/suppliers/${supplierId}/packages/picked`,
+    markPackageInvoiced: (supplierId: string) =>
+      `/integrator/order/meal/suppliers/${supplierId}/packages/invoiced`,
+    markManualShipped: (supplierId: string) =>
+      `/integrator/order/meal/suppliers/${supplierId}/packages/manual-shipped`,
+    markManualDelivered: (supplierId: string) =>
+      `/integrator/order/meal/suppliers/${supplierId}/packages/manual-delivered`,
+    markPackageUnsupplied: (supplierId: string) =>
+      `/integrator/order/meal/suppliers/${supplierId}/packages/unsupplied`,
+    sendInvoiceLink: (supplierId: string, serviceSourceId: string) =>
+      `/integrator/invoice/meal/suppliers/${supplierId}/supplier-invoice-links/4/${serviceSourceId}`,
+    deleteInvoiceLink: (supplierId: string, serviceSourceId: string) =>
+      `/integrator/invoice/meal/suppliers/${supplierId}/supplier-invoice-links/4/${serviceSourceId}`,
+  },
+} as const;
+
+export const TGO_UNSUPPLIED_REASONS: Record<TgoUnsuppliedReasonCode, string> = {
+  621: '621 - Tedarik Problemi (Ürün / Malzeme Tükendi)',
+  622: '622 - Mağaza / Restoran Şubesi Kapalı',
+  623: '623 - Mağaza Siparişi Hazırlayamıyor (Mutfak Arızası)',
+  624: '624 - Yüksek Yoğunluk / Kurye Yok',
+  626: '626 - Teslimat Alanı Dışı (Bölge Dışı Adres)',
+  627: '627 - Sipariş Karışıklığı / Operasyonel Hata',
+};
+
+/**
+ * Builds official Trendyol Go - Yemek HTTP headers per https://developers.tgoapps.com/docs/intro/authorization
+ */
+export function buildTgoYemekHeaders(params: {
+  supplierId: string;
+  apiKeyMaskedOrRaw: string;
+  agentName?: string;
+  executorUser?: string;
+}): Record<string, string> {
+  const cleanSupplier = (params.supplierId || 'TGY-000000').trim();
+  const cleanAgent = (params.agentName || 'Faturansit').trim();
+  const cleanExec = (params.executorUser || 'operasyon@faturansit.com.tr').trim();
+  return {
+    Authorization: `Basic base64(${params.apiKeyMaskedOrRaw}:SECRET)`,
+    'User-Agent': `${cleanSupplier} - ${cleanAgent}`,
+    'x-agentname': cleanAgent,
+    'x-executor-user': cleanExec,
+    'Content-Type': 'application/json',
+  };
+}
+
+/**
+ * Transitions a Trendyol Go - Yemek meal order package status according to official state machine:
+ * Created -> Picking (picked) -> Invoiced (invoiced) -> Shipped (manual-shipped) -> Delivered (manual-delivered) / UnSupplied (unsupplied)
+ */
+export function transitionTgoMealPackageStatus(
+  order: MarketplaceOrder,
+  nextStatus: TgoMealPackageStatus,
+  options?: {
+    preparationTimeMinutes?: number;
+    unsuppliedReasonCode?: TgoUnsuppliedReasonCode;
+    supplierId?: string;
+  }
+): {
+  updatedOrder: MarketplaceOrder;
+  endpointMethod: 'PUT';
+  endpointPath: string;
+  requestPayload: Record<string, unknown>;
+  statusSummary: string;
+} {
+  const supplierId = (options?.supplierId || '409182').replace(/^TGY-/i, '');
+  const packageId = order.tgoPackageId || `PKG-${order.marketplaceOrderNumber}`;
+
+  if (nextStatus === 'Picking') {
+    const prepTime = Math.max(5, Math.min(90, options?.preparationTimeMinutes ?? order.tgoPreparationTimeMinutes ?? 20));
+    const updatedOrder: MarketplaceOrder = {
+      ...order,
+      tgoPackageStatus: 'Picking',
+      tgoPreparationTimeMinutes: prepTime,
+      fulfillmentStage: 'HAZIRLANIYOR',
+      isCancelled: false,
+    };
+    return {
+      updatedOrder,
+      endpointMethod: 'PUT',
+      endpointPath: TGO_YEMEK_API_CONFIG.endpoints.acceptPackagePicked(supplierId),
+      requestPayload: {
+        packageId,
+        preparationTime: prepTime,
+      },
+      statusSummary: `Sipariş paketi (${packageId}) kabul edildi (Picking - Hazırlık: ${prepTime} dk).`,
+    };
+  }
+
+  if (nextStatus === 'Invoiced') {
+    const actualDate = Date.now();
+    const updatedOrder: MarketplaceOrder = {
+      ...order,
+      tgoPackageStatus: 'Invoiced',
+      fulfillmentStage: 'HAZIRLANIYOR',
+    };
+    return {
+      updatedOrder,
+      endpointMethod: 'PUT',
+      endpointPath: TGO_YEMEK_API_CONFIG.endpoints.markPackageInvoiced(supplierId),
+      requestPayload: {
+        packageId,
+        actualDate,
+      },
+      statusSummary: `Sipariş hazırlığı tamamlandı (Invoiced / Hazır - actualDate: ${actualDate}).`,
+    };
+  }
+
+  if (nextStatus === 'Shipped') {
+    const updatedOrder: MarketplaceOrder = {
+      ...order,
+      tgoPackageStatus: 'Shipped',
+      fulfillmentStage: 'KARGOYA_VERILDI',
+    };
+    return {
+      updatedOrder,
+      endpointMethod: 'PUT',
+      endpointPath: TGO_YEMEK_API_CONFIG.endpoints.markManualShipped(supplierId),
+      requestPayload: {
+        packageId,
+      },
+      statusSummary: `Sipariş paketi kuryeye teslim edildi / yola çıktı (Shipped).`,
+    };
+  }
+
+  if (nextStatus === 'Delivered') {
+    const updatedOrder: MarketplaceOrder = {
+      ...order,
+      tgoPackageStatus: 'Delivered',
+      fulfillmentStage: 'TESLIM_EDILDI',
+    };
+    return {
+      updatedOrder,
+      endpointMethod: 'PUT',
+      endpointPath: TGO_YEMEK_API_CONFIG.endpoints.markManualDelivered(supplierId),
+      requestPayload: {
+        packageId,
+      },
+      statusSummary: `Sipariş paketi müşteriye teslim edildi (Delivered).`,
+    };
+  }
+
+  if (nextStatus === 'UnSupplied' || nextStatus === 'Cancelled') {
+    const reasonCode: TgoUnsuppliedReasonCode = options?.unsuppliedReasonCode ?? 621;
+    const reasonLabel = TGO_UNSUPPLIED_REASONS[reasonCode];
+    const updatedOrder: MarketplaceOrder = {
+      ...order,
+      tgoPackageStatus: 'UnSupplied',
+      tgoUnsuppliedReasonCode: reasonCode,
+      isCancelled: true,
+      cancelledAt: '2026-11-06 16:45',
+      cancelReason: reasonLabel,
+    };
+    return {
+      updatedOrder,
+      endpointMethod: 'PUT',
+      endpointPath: TGO_YEMEK_API_CONFIG.endpoints.markPackageUnsupplied(supplierId),
+      requestPayload: {
+        packageId,
+        itemIdList: order.items.map((i) => i.id),
+        reasonId: reasonCode,
+      },
+      statusSummary: `Sipariş tedarik edilemedi / iptal bildirildi (${reasonLabel}).`,
+    };
+  }
+
+  return {
+    updatedOrder: {
+      ...order,
+      tgoPackageStatus: nextStatus,
+    },
+    endpointMethod: 'PUT',
+    endpointPath: TGO_YEMEK_API_CONFIG.endpoints.getPackages(supplierId),
+    requestPayload: { packageId },
+    statusSummary: `Paket durumu ${nextStatus} olarak güncellendi.`,
+  };
+}
+
+/**
+ * Feeds e-Fatura / e-Arşiv PDF link to Trendyol Go - Yemek via sendInvoiceLink (channelId = 4)
+ * POST /integrator/invoice/meal/suppliers/{supplierId}/supplier-invoice-links/4/{serviceSourceId}
+ */
+export function feedTgoMealInvoiceLink(
+  order: MarketplaceOrder,
+  supplierIdRaw: string,
+  customInvoiceLink?: string
+): {
+  success: boolean;
+  updatedOrder: MarketplaceOrder;
+  endpointPath: string;
+  requestPayload: { invoiceLink: string };
+  error?: string;
+} {
+  const supplierId = (supplierIdRaw || '409182').replace(/^TGY-/i, '');
+  const serviceSourceId = order.marketplaceOrderNumber.replace(/^TGY-/i, '');
+  const endpointPath = TGO_YEMEK_API_CONFIG.endpoints.sendInvoiceLink(
+    supplierId,
+    serviceSourceId
+  );
+
+  if (order.invoiceStatus !== 'INVOICED' || (!order.gibInvoiceNumber && !order.ettn)) {
+    return {
+      success: false,
+      updatedOrder: order,
+      endpointPath,
+      requestPayload: { invoiceLink: '' },
+      error:
+        'Trendyol Go - Yemek fatura linki beslemesi (channelId: 4) için önce siparişin GİB e-Fatura veya e-Arşiv belgesi kesilmelidir.',
+    };
+  }
+
+  const refCode = order.ettn || order.gibInvoiceNumber || order.id;
+  const resolvedLink =
+    (customInvoiceLink || '').trim() ||
+    order.tgoInvoiceLinkUrl ||
+    `https://faturansit.com.tr/e-belge/tgo-meal/${refCode}.pdf`;
+
+  const updatedOrder: MarketplaceOrder = {
+    ...order,
+    tgoInvoiceLinkSent: true,
+    tgoInvoiceLinkUrl: resolvedLink,
+    tgoPackageStatus:
+      order.tgoPackageStatus === 'Created' || order.tgoPackageStatus === 'Picking'
+        ? 'Invoiced'
+        : order.tgoPackageStatus ?? 'Invoiced',
+  };
+
+  return {
+    success: true,
+    updatedOrder,
+    endpointPath,
+    requestPayload: {
+      invoiceLink: resolvedLink,
+    },
+  };
+}
+
 

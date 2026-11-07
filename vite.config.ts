@@ -4,8 +4,31 @@ import path from 'path';
 import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
+  const isHmrDisabled = process.env.DISABLE_HMR === 'true';
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [
+      react(),
+      tailwindcss(),
+      ...(isHmrDisabled
+        ? [
+            {
+              name: 'disable-vite-client-ws',
+              enforce: 'post' as const,
+              transform(code: string, id: string) {
+                if (id.includes('vite/dist/client/client.mjs')) {
+                  return {
+                    code: code.replace(
+                      'transport.connect(createHMRHandler(handleMessage));',
+                      '/* HMR websocket disabled */'
+                    ),
+                    map: null,
+                  };
+                }
+              },
+            },
+          ]
+        : []),
+    ],
     resolve: {
       alias: {
         '@': path.resolve(import.meta.dirname, '.'),

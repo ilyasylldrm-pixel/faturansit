@@ -47,6 +47,11 @@ interface UsersAndIntegrationsViewProps {
       defaultCommissionRate: number;
       autoSyncIntervalMinutes: number;
       webhookEnabled: boolean;
+      tgoStoreBranchId?: string;
+      tgoEnvironment?: 'PROD' | 'STAGE';
+      tgoAgentName?: string;
+      tgoAutoAcceptOrders?: boolean;
+      tgoAutoSendInvoiceLink?: boolean;
     }
   ) => { valid: boolean; error?: string };
   onRemoveUserMarketplace: (userId: string, credentialId: string) => void;
@@ -133,6 +138,11 @@ export const UsersAndIntegrationsView: React.FC<UsersAndIntegrationsViewProps> =
   const [commissionRate, setCommissionRate] = useState('16.5');
   const [syncInterval, setSyncInterval] = useState('360');
   const [webhookEnabled, setWebhookEnabled] = useState(true);
+  const [tgoStoreBranchId, setTgoStoreBranchId] = useState('REST-88120');
+  const [tgoEnvironment, setTgoEnvironment] = useState<'PROD' | 'STAGE'>('PROD');
+  const [tgoAgentName, setTgoAgentName] = useState('Faturansit');
+  const [tgoAutoAcceptOrders, setTgoAutoAcceptOrders] = useState(true);
+  const [tgoAutoSendInvoiceLink, setTgoAutoSendInvoiceLink] = useState(true);
   const [mpFormError, setMpFormError] = useState<string | null>(null);
   const [mpFormSuccess, setMpFormSuccess] = useState<string | null>(null);
 
@@ -141,6 +151,9 @@ export const UsersAndIntegrationsView: React.FC<UsersAndIntegrationsViewProps> =
     const catalog = MARKETPLACE_CATALOG[nextMp];
     setSeriesPrefix(catalog.defaultPrefix);
     setCommissionRate(String(catalog.defaultCommission));
+    if (nextMp === 'trendyol_yemek') {
+      setSyncInterval('5');
+    }
     setMpFormError(null);
   };
 
@@ -193,6 +206,15 @@ export const UsersAndIntegrationsView: React.FC<UsersAndIntegrationsViewProps> =
       defaultCommissionRate: Number(commissionRate),
       autoSyncIntervalMinutes: Number(syncInterval) || 360,
       webhookEnabled,
+      ...(mpId === 'trendyol_yemek'
+        ? {
+            tgoStoreBranchId,
+            tgoEnvironment,
+            tgoAgentName,
+            tgoAutoAcceptOrders,
+            tgoAutoSendInvoiceLink,
+          }
+        : {}),
     });
 
     if (!res.valid) {
@@ -617,6 +639,14 @@ export const UsersAndIntegrationsView: React.FC<UsersAndIntegrationsViewProps> =
 
                         <div className="text-xs text-slate-500 font-mono flex items-center gap-2 flex-wrap">
                           <span>Satıcı ID: {cred.sellerId}</span>
+                          {cred.marketplace === 'trendyol_yemek' && cred.tgoStoreBranchId && (
+                            <>
+                              <span aria-hidden="true">·</span>
+                              <span className="text-orange-700 font-semibold">
+                                Restoran Şube: {cred.tgoStoreBranchId}
+                              </span>
+                            </>
+                          )}
                           <span aria-hidden="true">·</span>
                           <span>API Key: {cred.apiKeyMasked}</span>
                           <span aria-hidden="true">·</span>
@@ -625,6 +655,14 @@ export const UsersAndIntegrationsView: React.FC<UsersAndIntegrationsViewProps> =
                           </span>
                           <span aria-hidden="true">·</span>
                           <span>Komisyon: %{cred.defaultCommissionRate.toFixed(1)}</span>
+                          {cred.marketplace === 'trendyol_yemek' && (
+                            <>
+                              <span aria-hidden="true">·</span>
+                              <span className="text-emerald-700 font-semibold">
+                                tgoapis.com ({cred.tgoEnvironment || 'PROD'} · channelId: 4)
+                              </span>
+                            </>
+                          )}
                         </div>
                       </div>
 
@@ -852,6 +890,100 @@ export const UsersAndIntegrationsView: React.FC<UsersAndIntegrationsViewProps> =
                     </select>
                   </div>
                 </div>
+
+                {mpId === 'trendyol_yemek' && (
+                  <div className="p-3.5 bg-orange-50/70 border border-orange-200 rounded-lg space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                      <span className="font-bold text-orange-950">
+                        Trendyol Go - Yemek (Uber Eats · tgoapis.com) Özel API Ayarları
+                      </span>
+                      <span className="font-mono text-[11px] text-orange-800">
+                        User-Agent: {sellerId || 'TGY-409182'} - {tgoAgentName || 'Faturansit'}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label
+                          htmlFor="tgo-branch-input"
+                          className="block font-semibold text-slate-700 mb-1"
+                        >
+                          Restoran Şube ID (storeId)
+                        </label>
+                        <input
+                          id="tgo-branch-input"
+                          type="text"
+                          value={tgoStoreBranchId}
+                          onChange={(e) => setTgoStoreBranchId(e.target.value)}
+                          placeholder="Örn: REST-88120"
+                          className="w-full px-3 py-1.5 font-mono bg-white border border-slate-300 rounded-lg text-slate-900"
+                        />
+                      </div>
+
+                      <div>
+                        <label
+                          htmlFor="tgo-env-select"
+                          className="block font-semibold text-slate-700 mb-1"
+                        >
+                          TGO API Ortamı (Host)
+                        </label>
+                        <select
+                          id="tgo-env-select"
+                          value={tgoEnvironment}
+                          onChange={(e) =>
+                            setTgoEnvironment(e.target.value as 'PROD' | 'STAGE')
+                          }
+                          className="w-full px-3 py-1.5 font-mono bg-white border border-slate-300 rounded-lg text-slate-900"
+                        >
+                          <option value="PROD">PROD (api.tgoapis.com)</option>
+                          <option value="STAGE">STAGE (stageapi.tgoapis.com)</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label
+                          htmlFor="tgo-agent-input"
+                          className="block font-semibold text-slate-700 mb-1"
+                        >
+                          x-agentname Başlığı
+                        </label>
+                        <input
+                          id="tgo-agent-input"
+                          type="text"
+                          value={tgoAgentName}
+                          onChange={(e) => setTgoAgentName(e.target.value)}
+                          placeholder="Faturansit"
+                          className="w-full px-3 py-1.5 font-mono bg-white border border-slate-300 rounded-lg text-slate-900"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5 pt-1 text-[11px] text-slate-700">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={tgoAutoAcceptOrders}
+                          onChange={(e) => setTgoAutoAcceptOrders(e.target.checked)}
+                          className="rounded border-slate-300 text-orange-600"
+                        />
+                        <span>
+                          Yeni yemek sipariş paketlerini otomatik kabul et (<code className="font-mono">PUT /integrator/order/meal/suppliers/&#123;supplierId&#125;/packages/picked</code>)
+                        </span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={tgoAutoSendInvoiceLink}
+                          onChange={(e) => setTgoAutoSendInvoiceLink(e.target.checked)}
+                          className="rounded border-slate-300 text-orange-600"
+                        />
+                        <span>
+                          GİB e-Fatura / e-Arşiv kesildiğinde PDF linkini otomatik besle (<code className="font-mono">POST .../supplier-invoice-links/4/&#123;orderId&#125;</code> · 10 Yıl Erişim)
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+                )}
 
                 <label className="flex items-center gap-2 text-slate-700 cursor-pointer pt-1">
                   <input

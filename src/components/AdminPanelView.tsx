@@ -23,8 +23,11 @@ import {
   EInvoiceIntegrator,
   MarketplaceId,
   MarketplaceIntegration,
+  MarketplaceOrder,
   PlatformUser,
   SystemPlatformSettings,
+  TgoMealPackageStatus,
+  TgoUnsuppliedReasonCode,
   UserRole,
 } from '../types/invoicing';
 import { UsersAndIntegrationsView } from './UsersAndIntegrationsView';
@@ -67,6 +70,11 @@ interface AdminPanelViewProps {
       defaultCommissionRate: number;
       autoSyncIntervalMinutes: number;
       webhookEnabled: boolean;
+      tgoStoreBranchId?: string;
+      tgoEnvironment?: 'PROD' | 'STAGE';
+      tgoAgentName?: string;
+      tgoAutoAcceptOrders?: boolean;
+      tgoAutoSendInvoiceLink?: boolean;
     }
   ) => { valid: boolean; error?: string };
   onRemoveUserMarketplace: (userId: string, credentialId: string) => void;
@@ -83,7 +91,8 @@ interface AdminPanelViewProps {
 
   // Pazaryeri Mağazaları modülü entegrasyonu
   integrations: MarketplaceIntegration[];
-  onSyncMarketplace: (id: MarketplaceId | 'ALL') => { pulledCount: number; message: string };
+  orders?: MarketplaceOrder[];
+  onSyncMarketplace: (id: MarketplaceId | 'ALL', storeName?: string) => { pulledCount: number; message: string };
   onUpdateIntegration: (
     id: MarketplaceId,
     updates: {
@@ -92,9 +101,37 @@ interface AdminPanelViewProps {
       invoiceSeriesPrefix: string;
       defaultCommissionRate: number;
       autoSyncIntervalMinutes: number;
+      tgoStoreBranchId?: string;
+      tgoEnvironment?: 'PROD' | 'STAGE';
+      tgoAgentName?: string;
+      tgoAutoAcceptOrders?: boolean;
+      tgoAutoSendInvoiceLink?: boolean;
     },
     integrationRecordId?: string
   ) => void;
+  onTransitionTgoPackage?: (
+    orderId: string,
+    nextStatus: TgoMealPackageStatus,
+    options?: {
+      preparationTimeMinutes?: number;
+      unsuppliedReasonCode?: TgoUnsuppliedReasonCode;
+    }
+  ) => {
+    endpointMethod: string;
+    endpointPath: string;
+    requestPayload: Record<string, unknown>;
+    statusSummary: string;
+  } | void;
+  onFeedTgoInvoiceLink?: (
+    orderId: string,
+    customInvoiceLink?: string
+  ) => {
+    success: boolean;
+    endpointPath: string;
+    requestPayload: { invoiceLink: string };
+    error?: string;
+  } | void;
+  onIssueSingleInvoice?: (orderId: string, allowDefaultTckn?: boolean) => void;
 
   // Firma / Şirket Bilgileri modülü entegrasyonu
   companyProfiles?: Record<string, CompanyProfile>;
@@ -170,8 +207,12 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
   onBatchRepairIndividualOrders,
   auditLogs,
   integrations,
+  orders,
   onSyncMarketplace,
   onUpdateIntegration,
+  onTransitionTgoPackage,
+  onFeedTgoInvoiceLink,
+  onIssueSingleInvoice,
   companyProfiles,
   onUpdateCompanyProfile,
   rules,
@@ -622,8 +663,12 @@ export const AdminPanelView: React.FC<AdminPanelViewProps> = ({
         <MarketplacesView
           integrations={integrations}
           users={users}
+          orders={orders}
           onSyncMarketplace={onSyncMarketplace}
           onUpdateIntegration={onUpdateIntegration}
+          onTransitionTgoPackage={onTransitionTgoPackage}
+          onFeedTgoInvoiceLink={onFeedTgoInvoiceLink}
+          onIssueSingleInvoice={onIssueSingleInvoice}
           onGoToUserIntegrations={(userId) => {
             if (userId) onSelectUser(userId);
             setSubTab('users');

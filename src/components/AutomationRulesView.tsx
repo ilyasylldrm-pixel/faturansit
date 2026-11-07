@@ -28,6 +28,7 @@ const STAGE_NAMES: Record<FulfillmentStage, string> = {
 const MP_NAMES: Record<MarketplaceId | 'ALL', string> = {
   ALL: 'Tüm Pazaryerleri',
   trendyol: 'Trendyol',
+  trendyol_yemek: 'Trendyol Go - Yemek',
   hepsiburada: 'Hepsiburada',
   amazon: 'Amazon.com.tr',
   n11: 'N11',
@@ -340,10 +341,14 @@ export const AutomationRulesView: React.FC<AutomationRulesViewProps> = ({
                 >
                   <option value="ALL">Tüm Pazaryerleri</option>
                   <option value="trendyol">Trendyol</option>
+                  <option value="trendyol_yemek">Trendyol Go - Yemek</option>
                   <option value="hepsiburada">Hepsiburada</option>
                   <option value="amazon">Amazon.com.tr</option>
                   <option value="n11">N11</option>
                   <option value="pazarama">Pazarama</option>
+                  <option value="ciceksepeti">Çiçeksepeti</option>
+                  <option value="idefix">İdefix</option>
+                  <option value="pttavm">PttAVM</option>
                 </select>
               </div>
 
